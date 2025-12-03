@@ -106,6 +106,67 @@ This provides the missing function bodies that route TFLite's debug output to Ar
 
 ---
 
+## Problem 5: BLE "GATT Error Unknown" During Model Upload
+
+**Error:**
+```
+BLE upload failed: NotSupportedError: GATT Error Unknown.
+```
+
+**Root Cause:**
+This error has two contributing causes:
+
+1. **Firmware characteristic permissions**: The `modelUploadChar` was defined with only `BLEWrite` permission, but Web Bluetooth's `writeValueWithResponse()` requires the characteristic to explicitly support write-with-response mode.
+
+2. **Web app using unreliable writes**: The original code used `writeValue()` which defaults to "write without response" on some browsers. This can cause data loss and timing issues during multi-packet transfers like model uploads.
+
+**Solution:**
+
+### Firmware Fix (`main.cpp`):
+Changed the characteristic definition to support both write modes:
+```cpp
+// Before
+BLECharacteristic modelUploadChar(MODEL_UPLOAD_UUID, BLEWrite, 244);
+
+// After
+BLECharacteristic modelUploadChar(MODEL_UPLOAD_UUID, BLEWrite | BLEWriteWithoutResponse, 244);
+```
+
+### Web App Fix (`bleModelUploadService.ts`):
+1. Changed all `writeValue()` calls to `writeValueWithResponse()` for reliable delivery:
+```typescript
+// Before
+await this.modelUploadChar!.writeValue(data);
+
+// After
+await this.modelUploadChar!.writeValueWithResponse(data);
+```
+
+2. Reduced chunk size for better compatibility:
+```typescript
+// Before
+const MAX_CHUNK_SIZE = 240;
+
+// After
+const MAX_CHUNK_SIZE = 200;  // Smaller chunks for reliability
+```
+
+3. Increased delays between BLE operations:
+```typescript
+// After START command
+await this.delay(200);  // Was 100ms
+
+// Between chunks
+await this.delay(50);   // Was 30ms
+
+// Before reading final status
+await this.delay(1000); // Was 500ms
+```
+
+4. Added detailed console logging to help debug future issues.
+
+---
+
 ## Summary
 
 | # | Error Type | Root Cause | Fix |
@@ -114,6 +175,7 @@ This provides the missing function bodies that route TFLite's debug output to Ar
 | 2 | Package not found | Library not in PlatformIO registry | Use GitHub URL directly |
 | 3 | Undeclared function | Called before definition | Add forward declaration |
 | 4 | Undefined reference | Platform-specific functions not implemented | Create `tflite_debug.cpp` with implementations |
+| 5 | GATT Error Unknown | BLE write mode mismatch | Add `BLEWriteWithoutResponse` flag + use `writeValueWithResponse()` |
 
 ---
 
@@ -123,3 +185,5 @@ This provides the missing function bodies that route TFLite's debug output to Ar
 2. **PlatformIO supports GitHub URLs** - When a library isn't in the registry, use the Git URL directly
 3. **C++ requires forward declarations** - Functions must be declared before use
 4. **TFLite Micro is platform-agnostic** - You must implement platform-specific functions like `DebugLog`
+5. **BLE writes need proper permissions** - Use `BLEWrite | BLEWriteWithoutResponse` for Web Bluetooth compatibility
+6. **Use writeValueWithResponse() for reliability** - Especially for multi-packet transfers like model uploads

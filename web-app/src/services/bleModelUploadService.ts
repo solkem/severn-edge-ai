@@ -1,6 +1,6 @@
-/**
+﻿/**
  * BLE Model Upload Service
- * 
+ *
  * Handles over-the-air model deployment to Arduino via Bluetooth Low Energy.
  * This allows students to deploy trained models without touching firmware code.
  */
@@ -22,8 +22,8 @@ const MODEL_STATUS_ERROR = 0x03;
 // Upload status subcodes
 const STATUS_SUCCESS = 0x04;
 
-// BLE characteristic max write size
-const MAX_CHUNK_SIZE = 240;  // Leave room for headers
+// BLE characteristic max write size (conservative for compatibility)
+const MAX_CHUNK_SIZE = 200;  // Smaller chunks for reliability
 
 export interface UploadProgress {
   state: 'idle' | 'starting' | 'uploading' | 'completing' | 'success' | 'error';
@@ -47,7 +47,7 @@ function calculateCrc32(data: Uint8Array): number {
     }
     table[i] = c;
   }
-  
+
   let crc = 0xFFFFFFFF;
   for (let i = 0; i < data.length; i++) {
     crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
@@ -65,14 +65,26 @@ export class BLEModelUploadService {
    */
   async initialize(server: BluetoothRemoteGATTServer): Promise<boolean> {
     try {
+      console.log('Initializing model upload service...');
+      console.log('Getting primary service:', BLE_UUIDS.SERVICE);
+      
       const service = await server.getPrimaryService(BLE_UUIDS.SERVICE);
-      
+      console.log('Service obtained, getting characteristics...');
+
+      console.log('Getting MODEL_UPLOAD characteristic:', BLE_UUIDS.MODEL_UPLOAD);
       this.modelUploadChar = await service.getCharacteristic(BLE_UUIDS.MODEL_UPLOAD);
+      console.log('MODEL_UPLOAD characteristic obtained');
+
+      console.log('Getting MODEL_STATUS characteristic:', BLE_UUIDS.MODEL_STATUS);
       this.modelStatusChar = await service.getCharacteristic(BLE_UUIDS.MODEL_STATUS);
-      
+      console.log('MODEL_STATUS characteristic obtained');
+
+      console.log('Model upload service initialized successfully');
       return true;
     } catch (error) {
       console.error('Failed to initialize model upload service:', error);
+      console.error('Error name:', (error as Error).name);
+      console.error('Error message:', (error as Error).message);
       return false;
     }
   }
@@ -123,52 +135,58 @@ export class BLEModelUploadService {
     try {
       // Calculate CRC32 of model data
       const crc32 = calculateCrc32(modelData);
-      
+      console.log(`Starting upload: ${totalBytes} bytes, CRC32: ${crc32.toString(16)}`);
+
       // Step 1: Send START command with model info
       reportProgress('starting', 0, 'Initiating upload...');
       await this.sendStartCommand(totalBytes, crc32, classLabels);
-      
-      // Small delay to let firmware prepare
-      await this.delay(100);
+      console.log('START command sent');
+
+      // Delay to let firmware prepare
+      await this.delay(200);
 
       // Step 2: Send model data in chunks
       reportProgress('uploading', 0, 'Uploading model...');
       let offset = 0;
-      
+
       // Data chunk size: MAX_CHUNK_SIZE - 5 bytes for header (cmd + offset)
       const dataChunkSize = MAX_CHUNK_SIZE - 5;
-      
+
       while (offset < totalBytes) {
         const remaining = totalBytes - offset;
         const chunkSize = Math.min(dataChunkSize, remaining);
         const chunk = modelData.slice(offset, offset + chunkSize);
-        
+
         await this.sendChunkCommand(offset, chunk);
-        
+
         offset += chunkSize;
-        
+
         reportProgress(
           'uploading',
           offset,
           `Uploading... ${Math.round((offset / totalBytes) * 100)}%`
         );
-        
-        // Small delay between chunks to prevent BLE buffer overflow
-        await this.delay(30);
+
+        // Delay between chunks to prevent BLE buffer overflow
+        await this.delay(50);
       }
+
+      console.log('All chunks sent');
 
       // Step 3: Send COMPLETE command
       reportProgress('completing', totalBytes, 'Finalizing upload...');
       await this.sendCompleteCommand();
-      
-      // Wait for firmware to process
-      await this.delay(500);
+      console.log('COMPLETE command sent');
+
+      // Wait for firmware to process and save
+      await this.delay(1000);
       
       // Check status
       const status = await this.readStatus();
-      
+      console.log('Status:', status);
+
       if (status.statusCode === STATUS_SUCCESS) {
-        reportProgress('success', totalBytes, 'Model deployed successfully! 🎉');
+        reportProgress('success', totalBytes, 'Model deployed successfully! ');
         return true;
       } else {
         throw new Error(`Upload failed with status code: ${status.statusCode}`);
@@ -176,15 +194,16 @@ export class BLEModelUploadService {
 
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Upload error:', error);
       reportProgress('error', 0, `Upload failed: ${message}`);
-      
+
       // Try to cancel the upload
       try {
         await this.sendCancelCommand();
       } catch {
         // Ignore cancel errors
       }
-      
+
       throw error;
     } finally {
       this.isUploading = false;
@@ -206,63 +225,63 @@ export class BLEModelUploadService {
   private async sendStartCommand(modelSize: number, crc32: number, labels: string[]): Promise<void> {
     // Format: [cmd(1), size(4), crc32(4), numClasses(1), labels...]
     const numClasses = Math.min(labels.length, 8);
-    
+
     // Build labels string (null-terminated, concatenated)
     let labelsData = '';
     for (let i = 0; i < numClasses; i++) {
       labelsData += labels[i].substring(0, 15) + '\0';
     }
     const labelsBytes = new TextEncoder().encode(labelsData);
-    
+
     const data = new Uint8Array(10 + labelsBytes.length);
     data[0] = MODEL_CMD_START;
-    
+
     // Model size (4 bytes, little-endian)
     data[1] = modelSize & 0xFF;
     data[2] = (modelSize >> 8) & 0xFF;
     data[3] = (modelSize >> 16) & 0xFF;
     data[4] = (modelSize >> 24) & 0xFF;
-    
+
     // CRC32 (4 bytes, little-endian)
     data[5] = crc32 & 0xFF;
     data[6] = (crc32 >> 8) & 0xFF;
     data[7] = (crc32 >> 16) & 0xFF;
     data[8] = (crc32 >> 24) & 0xFF;
-    
+
     // Number of classes
     data[9] = numClasses;
-    
+
     // Labels
     data.set(labelsBytes, 10);
-    
-    await this.modelUploadChar!.writeValue(data);
+
+    await this.modelUploadChar!.writeValueWithResponse(data);
   }
 
   private async sendChunkCommand(offset: number, chunk: Uint8Array): Promise<void> {
     // Format: [cmd(1), offset(4), data(N)]
     const data = new Uint8Array(5 + chunk.length);
     data[0] = MODEL_CMD_CHUNK;
-    
+
     // Offset (4 bytes, little-endian)
     data[1] = offset & 0xFF;
     data[2] = (offset >> 8) & 0xFF;
     data[3] = (offset >> 16) & 0xFF;
     data[4] = (offset >> 24) & 0xFF;
-    
+
     // Chunk data
     data.set(chunk, 5);
-    
-    await this.modelUploadChar!.writeValue(data);
+
+    await this.modelUploadChar!.writeValueWithResponse(data);
   }
 
   private async sendCompleteCommand(): Promise<void> {
     const data = new Uint8Array([MODEL_CMD_COMPLETE]);
-    await this.modelUploadChar!.writeValue(data);
+    await this.modelUploadChar!.writeValueWithResponse(data);
   }
 
   private async sendCancelCommand(): Promise<void> {
     const data = new Uint8Array([MODEL_CMD_CANCEL]);
-    await this.modelUploadChar!.writeValue(data);
+    await this.modelUploadChar!.writeValueWithResponse(data);
   }
 
   private async readStatus(): Promise<{ state: number; progress: number; statusCode: number }> {
@@ -280,4 +299,3 @@ export class BLEModelUploadService {
 }
 
 // Export singleton instance
-export const bleModelUploadService = new BLEModelUploadService();

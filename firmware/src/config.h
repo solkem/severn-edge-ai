@@ -73,7 +73,7 @@
 // ============================================================================
 // DEBUG (uncomment to enable serial debugging)
 // ============================================================================
-// #define DEBUG_MODE
+#define DEBUG_MODE
 #ifdef DEBUG_MODE
   #define DEBUG_PRINT(x) Serial.print(x)
   #define DEBUG_PRINTLN(x) Serial.println(x)

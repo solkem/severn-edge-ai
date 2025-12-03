@@ -54,7 +54,7 @@ BLECharacteristic configChar(CONFIG_CHAR_UUID, BLERead | BLEWrite, 4);
 // Model upload: variable length chunks (max 244 bytes per write)
 // Format: [cmd(1)] [offset(4)] [data(up to 239)]
 // Commands: 0x01=start, 0x02=chunk, 0x03=finish, 0x04=cancel
-BLECharacteristic modelUploadChar(MODEL_UPLOAD_UUID, BLEWrite, 244);
+BLECharacteristic modelUploadChar(MODEL_UPLOAD_UUID, BLEWrite | BLEWriteWithoutResponse, 244);
 
 // Model status: [state(1), progress(1), status_code(1), reserved(1)]
 BLECharacteristic modelStatusChar(MODEL_STATUS_UUID, BLERead | BLENotify, 4);
