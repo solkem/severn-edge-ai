@@ -5,7 +5,7 @@
 // FIRMWARE VERSION
 // ============================================================================
 #ifndef FIRMWARE_VERSION_MAJOR
-#define FIRMWARE_VERSION_MAJOR 3
+#define FIRMWARE_VERSION_MAJOR 1
 #endif
 #ifndef FIRMWARE_VERSION_MINOR
 #define FIRMWARE_VERSION_MINOR 1
@@ -23,6 +23,15 @@
 #define INFERENCE_CHAR_UUID   "19B10003-E8F2-537E-4F6C-D104768A1214"
 #define DEVICE_INFO_UUID      "19B10004-E8F2-537E-4F6C-D104768A1214"
 #define CONFIG_CHAR_UUID      "19B10005-E8F2-537E-4F6C-D104768A1214"
+#define MODEL_UPLOAD_UUID     "19B10006-E8F2-537E-4F6C-D104768A1214"  // Model upload (write)
+#define MODEL_STATUS_UUID     "19B10007-E8F2-537E-4F6C-D104768A1214"  // Upload status (notify)
+
+// ============================================================================
+// MODEL STORAGE CONFIGURATION
+// ============================================================================
+#define MAX_MODEL_SIZE (20 * 1024)    // 20KB max model size
+#define MODEL_CHUNK_SIZE 240          // BLE MTU-safe chunk size
+#define FLASH_MODEL_MAGIC 0x4D4C5446  // "TFLM" magic number
 
 // ============================================================================
 // SENSOR CONFIGURATION

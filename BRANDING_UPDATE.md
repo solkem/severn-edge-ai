@@ -7,7 +7,7 @@ The Severn School compass logo has been successfully integrated into the web app
 ### Logo Locations
 
 1. **Favicon** (`index.html`)
-   - Browser tab icon now shows Severn compass
+   - Browser tab icon shows Severn compass
    - Title updated to "Severn Edge AI"
 
 2. **Connect Page** (`ConnectPage.tsx`)

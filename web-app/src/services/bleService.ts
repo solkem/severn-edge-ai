@@ -98,6 +98,14 @@ export class BLEService {
     return this.device?.name || null;
   }
 
+  /**
+   * Get the GATT server for direct characteristic access
+   * Used by model upload service
+   */
+  getServer(): BluetoothRemoteGATTServer | null {
+    return this.server;
+  }
+
   // ============================================================================
   // Device Info
   // ============================================================================

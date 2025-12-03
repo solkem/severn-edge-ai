@@ -9,11 +9,18 @@
 // TensorFlow Lite Micro Inference Engine
 // ============================================================================
 
-// Initialize the TFLite interpreter with the model
+// Initialize the TFLite interpreter with the model from flash
 bool setupInference();
+
+// Reload model from flash (called after BLE upload)
+bool reloadModel();
+
+// Check if a valid model is loaded
+bool isModelLoaded();
 
 // Add a sensor sample to the sliding window buffer
 void addSample(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz);
+
 
 // Check if we have enough samples for inference
 bool isWindowReady();

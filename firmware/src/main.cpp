@@ -1,14 +1,20 @@
 /**
- * Severn Edge AI v3.1 - Arduino Firmware
+ * Severn Edge AI v3.2 - Arduino Firmware
  *
  * Complete BLE machine learning system for gesture recognition
  * Supports Arduino Nano 33 BLE Sense Rev1 (LSM9DS1) and Rev2 (BMI270)
+ * 
+ * Features:
+ * - Over-the-air model upload via BLE
+ * - Model persistence in flash memory
+ * - Real-time inference with TFLite Micro
  */
 
 #include <ArduinoBLE.h>
 #include "config.h"
 #include "sensor_reader.h"
 #include "inference.h"
+#include "flash_storage.h"
 
 // ============================================================================
 // GLOBAL STATE
@@ -39,17 +45,32 @@ BLECharacteristic sensorChar(SENSOR_CHAR_UUID, BLERead | BLENotify, 17);
 // Inference results: [class, confidence%, reserved, reserved]
 BLECharacteristic inferenceChar(INFERENCE_CHAR_UUID, BLERead | BLENotify, 4);
 
-// Device info: firmware version, chip type, stats (20 bytes)
-BLECharacteristic deviceInfoChar(DEVICE_INFO_UUID, BLERead, 20);
+// Device info: firmware version, chip type, stats (24 bytes - extended)
+BLECharacteristic deviceInfoChar(DEVICE_INFO_UUID, BLERead, 24);
 
 // Config: [sample_rate_hz (uint16), window_size (uint16)]
 BLECharacteristic configChar(CONFIG_CHAR_UUID, BLERead | BLEWrite, 4);
+
+// Model upload: variable length chunks (max 244 bytes per write)
+// Format: [cmd(1)] [offset(4)] [data(up to 239)]
+// Commands: 0x01=start, 0x02=chunk, 0x03=finish, 0x04=cancel
+BLECharacteristic modelUploadChar(MODEL_UPLOAD_UUID, BLEWrite, 244);
+
+// Model status: [state(1), progress(1), status_code(1), reserved(1)]
+BLECharacteristic modelStatusChar(MODEL_STATUS_UUID, BLERead | BLENotify, 4);
+
+// ============================================================================
+// MODEL UPLOAD STATE
+// ============================================================================
+static uint32_t uploadExpectedSize = 0;
+static uint32_t uploadExpectedCrc = 0;
+static uint8_t uploadNumClasses = 0;
 
 // ============================================================================
 // DEVICE INFO PACKET BUILDER
 // ============================================================================
 void updateDeviceInfo() {
-    uint8_t info[20];
+    uint8_t info[24];
 
     info[0] = FIRMWARE_VERSION_MAJOR;
     info[1] = FIRMWARE_VERSION_MINOR;
@@ -73,7 +94,134 @@ void updateDeviceInfo() {
     // Inference count
     memcpy(&info[16], &inferenceCount, 4);
 
-    deviceInfoChar.writeValue(info, 20);
+    // Model status: 1 byte (0=no model, 1=model loaded)
+    info[20] = hasStoredModel() ? 1 : 0;
+    
+    // Stored model size (3 bytes, little-endian, up to 16MB)
+    uint32_t modelSize = hasStoredModel() ? getStoredModelSize() : 0;
+    info[21] = modelSize & 0xFF;
+    info[22] = (modelSize >> 8) & 0xFF;
+    info[23] = (modelSize >> 16) & 0xFF;
+
+    deviceInfoChar.writeValue(info, 24);
+}
+
+// ============================================================================
+// MODEL UPLOAD STATUS UPDATE
+// ============================================================================
+void updateModelStatus(UploadState state, uint8_t progress, UploadStatus status) {
+    uint8_t statusData[4];
+    statusData[0] = (uint8_t)state;
+    statusData[1] = progress;
+    statusData[2] = (uint8_t)status;
+    statusData[3] = 0;  // Reserved
+    modelStatusChar.writeValue(statusData, 4);
+}
+
+// ============================================================================
+// MODEL UPLOAD HANDLER
+// ============================================================================
+void handleModelUpload() {
+    if (!modelUploadChar.written()) return;
+    
+    int len = modelUploadChar.valueLength();
+    if (len < 1) return;
+    
+    const uint8_t* data = modelUploadChar.value();
+    uint8_t cmd = data[0];
+    
+    switch (cmd) {
+        case 0x01: {  // START: [cmd(1), size(4), crc32(4), numClasses(1), labels...]
+            if (len < 10) {
+                updateModelStatus(UPLOAD_ERROR, 0, STATUS_ERROR_FORMAT);
+                return;
+            }
+            
+            memcpy(&uploadExpectedSize, &data[1], 4);
+            memcpy(&uploadExpectedCrc, &data[5], 4);
+            uploadNumClasses = data[9];
+            
+            DEBUG_PRINT("Model upload starting: ");
+            DEBUG_PRINT(uploadExpectedSize);
+            DEBUG_PRINT(" bytes, ");
+            DEBUG_PRINT(uploadNumClasses);
+            DEBUG_PRINTLN(" classes");
+            
+            if (uploadExpectedSize > MAX_MODEL_SIZE) {
+                updateModelStatus(UPLOAD_ERROR, 0, STATUS_ERROR_SIZE);
+                return;
+            }
+            
+            beginModelUpload(uploadExpectedSize, uploadNumClasses);
+            
+            // Parse class labels from remaining bytes
+            int offset = 10;
+            for (int i = 0; i < uploadNumClasses && offset < len; i++) {
+                // Labels are null-terminated strings
+                const char* label = (const char*)&data[offset];
+                setModelLabel(i, label);
+                offset += strlen(label) + 1;
+            }
+            
+            updateModelStatus(UPLOAD_RECEIVING, 0, STATUS_RECEIVING);
+            break;
+        }
+        
+        case 0x02: {  // CHUNK: [cmd(1), offset(4), data(N)]
+            if (len < 5) {
+                updateModelStatus(UPLOAD_ERROR, 0, STATUS_ERROR_FORMAT);
+                return;
+            }
+            
+            uint32_t offset;
+            memcpy(&offset, &data[1], 4);
+            uint16_t chunkLen = len - 5;
+            
+            if (!receiveModelChunk(&data[5], chunkLen, offset)) {
+                updateModelStatus(UPLOAD_ERROR, getUploadProgress(), STATUS_ERROR_FORMAT);
+                return;
+            }
+            
+            updateModelStatus(UPLOAD_RECEIVING, getUploadProgress(), STATUS_RECEIVING);
+            break;
+        }
+        
+        case 0x03: {  // FINISH: [cmd(1)]
+            DEBUG_PRINTLN("Finalizing model upload...");
+            updateModelStatus(UPLOAD_RECEIVING, 100, STATUS_VALIDATING);
+            
+            UploadStatus result = finalizeModelUpload(uploadExpectedCrc);
+            
+            if (result == STATUS_SUCCESS) {
+                DEBUG_PRINTLN("Model saved! Reloading...");
+                updateModelStatus(UPLOAD_COMPLETE, 100, STATUS_SAVING);
+                
+                // Reload the model into TFLite interpreter
+                if (reloadModel()) {
+                    updateModelStatus(UPLOAD_COMPLETE, 100, STATUS_SUCCESS);
+                    updateDeviceInfo();  // Update device info with new model status
+                    DEBUG_PRINTLN("Model reload successful!");
+                } else {
+                    updateModelStatus(UPLOAD_ERROR, 100, STATUS_ERROR_FORMAT);
+                    DEBUG_PRINTLN("Model reload failed!");
+                }
+            } else {
+                updateModelStatus(UPLOAD_ERROR, 100, result);
+            }
+            break;
+        }
+        
+        case 0x04: {  // CANCEL: [cmd(1)]
+            DEBUG_PRINTLN("Model upload cancelled");
+            updateModelStatus(UPLOAD_IDLE, 0, STATUS_READY);
+            break;
+        }
+        
+        default:
+            DEBUG_PRINT("Unknown upload command: ");
+            DEBUG_PRINTLN(cmd);
+            break;
+    }
 }
 
 // ============================================================================
@@ -135,6 +283,8 @@ void setup() {
     edgeService.addCharacteristic(inferenceChar);
     edgeService.addCharacteristic(deviceInfoChar);
     edgeService.addCharacteristic(configChar);
+    edgeService.addCharacteristic(modelUploadChar);
+    edgeService.addCharacteristic(modelStatusChar);
 
     BLE.addService(edgeService);
 
@@ -194,6 +344,9 @@ void loop() {
                 // Update device info when mode changes
                 updateDeviceInfo();
             }
+            
+            // Handle model upload commands
+            handleModelUpload();
 
             // Sample at configured rate
             if (millis() - lastSampleTime >= sampleIntervalMs) {

@@ -6,6 +6,9 @@ import { useState } from 'react';
 import { Sample, GestureLabel, TrainingProgress } from '../types';
 import { TrainingService } from '../services/trainingService';
 import { KidFeedback } from '../components/KidFeedback';
+import { exportForArduino, modelToTFLiteBytes } from '../services/modelExportService';
+import { bleModelUploadService, UploadProgress } from '../services/bleModelUploadService';
+import { getBLEService } from '../services/bleService';
 
 interface TrainPageProps {
   samples: Sample[];
@@ -16,6 +19,9 @@ interface TrainPageProps {
 export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
   const [isTraining, setIsTraining] = useState(false);
   const [isDone, setIsDone] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const [progress, setProgress] = useState<TrainingProgress | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +44,67 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
       console.error('Training failed:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
       setIsTraining(false);
+    }
+  };
+
+  const handleExport = async () => {
+    const model = trainingService.getModel();
+    if (!model) return;
+    
+    setIsExporting(true);
+    try {
+      await exportForArduino(model, labels);
+    } catch (err) {
+      console.error('Export failed:', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleBLEUpload = async () => {
+    const model = trainingService.getModel();
+    if (!model) return;
+    
+    setIsUploading(true);
+    setUploadProgress(null);
+    
+    try {
+      // Get model bytes
+      const modelBytes = await modelToTFLiteBytes(model, labels);
+      
+      // Get BLE server
+      const bleService = getBLEService();
+      const server = bleService.getServer();
+      
+      if (!server) {
+        throw new Error('Not connected to Arduino. Please connect via Bluetooth first.');
+      }
+      
+      // Initialize upload service
+      const initialized = await bleModelUploadService.initialize(server);
+      if (!initialized) {
+        throw new Error('Failed to initialize model upload. Make sure your Arduino firmware supports OTA model updates.');
+      }
+      
+      // Get label names
+      const labelNames = labels.map(l => l.name);
+      
+      // Upload model
+      await bleModelUploadService.uploadModel(modelBytes, labelNames, (progress) => {
+        setUploadProgress(progress);
+      });
+      
+    } catch (err) {
+      console.error('BLE upload failed:', err);
+      setUploadProgress({
+        state: 'error',
+        progress: 0,
+        bytesTransferred: 0,
+        totalBytes: 0,
+        message: err instanceof Error ? err.message : 'Unknown error'
+      });
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -169,9 +236,69 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
                 </div>
               </div>
 
+              {/* Export Button */}
+              <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl">📦</span>
+                  <div className="flex-grow">
+                    <h4 className="font-bold text-amber-900 mb-1">Deploy to Arduino</h4>
+                    <p className="text-sm text-amber-700 mb-3">
+                      Upload the model directly via Bluetooth or download as a C header file.
+                    </p>
+                    
+                    {/* BLE Upload Section */}
+                    <div className="space-y-3">
+                      {uploadProgress && (
+                        <div className={`p-3 rounded-lg text-sm ${
+                          uploadProgress.state === 'success' 
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : uploadProgress.state === 'error'
+                            ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                            : 'bg-blue-100 text-blue-800 border border-blue-200'
+                        }`}>
+                          {uploadProgress.state === 'uploading' && (
+                            <div className="mb-2">
+                              <div className="flex justify-between text-xs mb-1">
+                                <span>Uploading...</span>
+                                <span>{uploadProgress.progress}%</span>
+                              </div>
+                              <div className="bg-blue-200 rounded-full h-2 overflow-hidden">
+                                <div 
+                                  className="bg-blue-600 h-full transition-all duration-200"
+                                  style={{ width: `${uploadProgress.progress}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          {uploadProgress.message}
+                        </div>
+                      )}
+                      
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={handleBLEUpload} 
+                          disabled={isUploading}
+                          className="btn-primary text-sm py-2 px-4 flex-1"
+                        >
+                          {isUploading ? '⏳ Uploading...' : '📡 Upload via Bluetooth'}
+                        </button>
+                        <button 
+                          onClick={handleExport} 
+                          disabled={isExporting}
+                          className="btn-secondary text-sm py-2 px-4 bg-amber-100 hover:bg-amber-200 border-amber-300 text-amber-900"
+                        >
+                          {isExporting ? '⏳' : '⬇️'} .h file
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <button onClick={handleNext} className="btn-success text-xl w-full py-4 shadow-xl shadow-emerald-200">
                 Next: Test It Out! →
               </button>
+
             </div>
           </div>
         )}
