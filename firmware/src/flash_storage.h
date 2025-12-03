@@ -1,9 +1,15 @@
 /**
  * Flash Storage Module for Model Persistence
  * 
- * Stores trained TFLite models in the Arduino's flash memory so they
- * persist across power cycles. Uses the FlashStorage library for
- * nRF52840-based boards (Arduino Nano 33 BLE).
+ * Stores trained neural network models in the Arduino's RAM.
+ * 
+ * ============================================================================
+ * UPDATED: Now stores SimpleNN format instead of TFLite!
+ * ============================================================================
+ * 
+ * The SimpleNN format stores raw weight arrays that our hand-written
+ * inference engine can use directly. See docs/NEURAL_NETWORK_BASICS.md
+ * for details on why we use this instead of TFLite.
  */
 
 #ifndef FLASH_STORAGE_H
@@ -11,18 +17,7 @@
 
 #include <Arduino.h>
 #include "config.h"
-
-// ============================================================================
-// Model Storage Structure
-// ============================================================================
-struct StoredModel {
-    uint32_t magic;           // Magic number to verify valid model
-    uint32_t modelSize;       // Size of model data in bytes
-    uint32_t numClasses;      // Number of output classes
-    uint32_t crc32;           // CRC32 checksum of model data
-    char labels[8][16];       // Up to 8 class labels, 16 chars each
-    uint8_t modelData[MAX_MODEL_SIZE];  // The TFLite model bytes
-};
+#include "simple_nn.h"
 
 // ============================================================================
 // Upload State Machine
@@ -57,15 +52,15 @@ enum UploadStatus {
 void initFlashStorage();
 
 /**
- * Check if a valid model is stored in flash
+ * Check if a valid model is stored
  */
 bool hasStoredModel();
 
 /**
- * Get pointer to stored model data (read-only)
+ * Get pointer to stored SimpleNN model
  * Returns nullptr if no valid model exists
  */
-const uint8_t* getStoredModelData();
+const SimpleNNModel* getStoredSimpleNNModel();
 
 /**
  * Get size of stored model in bytes
@@ -84,7 +79,7 @@ const char* getStoredModelLabel(uint8_t classIndex);
 
 /**
  * Begin receiving a new model over BLE
- * @param totalSize Expected total size of model
+ * @param totalSize Expected total size of model data
  * @param numClasses Number of output classes
  */
 void beginModelUpload(uint32_t totalSize, uint32_t numClasses);
@@ -104,7 +99,7 @@ bool receiveModelChunk(const uint8_t* data, uint16_t length, uint32_t offset);
 void setModelLabel(uint8_t classIndex, const char* label);
 
 /**
- * Finalize and save the model to flash
+ * Finalize and save the model
  * @param expectedCrc32 CRC32 checksum to verify
  * @return UploadStatus code
  */
@@ -121,7 +116,7 @@ uint8_t getUploadProgress();
 UploadState getUploadState();
 
 /**
- * Clear stored model from flash
+ * Clear stored model
  */
 void clearStoredModel();
 

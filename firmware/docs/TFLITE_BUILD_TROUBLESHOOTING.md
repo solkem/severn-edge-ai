@@ -177,6 +177,7 @@ await this.delay(1000); // Was 500ms
 | 4 | Undefined reference | Platform-specific functions not implemented | Create `tflite_debug.cpp` with implementations |
 | 5 | GATT Error Unknown | BLE write mode mismatch | Add `BLEWriteWithoutResponse` flag + use `writeValueWithResponse()` |
 | 6 | Status code 13 (FORMAT) | TF.js models aren't TFLite format | Use C header export or Python conversion |
+| **7** | **TFLite blocked** | **Can't convert TF.js→TFLite in browser** | **Replace TFLite with SimpleNN!** |
 
 ---
 
@@ -241,3 +242,84 @@ Updated `modelExportService.ts` to:
 - Add `canConvertToTFLite()` and `getTFLiteUnavailableReason()` helper functions
 - Add `loadTFLiteFile()` for loading pre-converted .tflite files
 - Add console warnings when `modelToTFLiteBytes()` is called
+
+---
+
+## Problem 7 - THE FINAL SOLUTION: Replacing TFLite with SimpleNN
+
+After discovering that browser-based TensorFlow.js models cannot be converted to TFLite format without a Python backend, we developed **SimpleNN** - a custom educational neural network inference engine.
+
+### The Problem
+Students (5th graders) need to:
+1. Train models in the browser ✅
+2. Upload trained models to Arduino via BLE ❌ (TFLite can't convert in browser)
+3. Run inference on the Arduino ❌ (TFLite needs valid .tflite files)
+
+### The Solution: SimpleNN
+
+**SimpleNN** is a hand-written, educational neural network inference engine that:
+- Uses the **exact same math** as TensorFlow, but with readable code
+- Runs on Arduino with **no external dependencies**
+- Can load weights directly from TensorFlow.js (no conversion needed!)
+- Is **small enough** for students to understand
+
+### Architecture
+
+```
+TensorFlow.js Model:
+  Flatten → Dense(32, relu) → Dense(N, softmax)
+
+SimpleNN on Arduino:
+  Same architecture, same math, readable code!
+```
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/simple_nn.h` | NEW: SimpleNN class definition |
+| `src/simple_nn.cpp` | NEW: Implementation with documented math |
+| `src/inference.cpp` | Rewritten to use SimpleNN instead of TFLite |
+| `src/flash_storage.cpp` | Updated for SimpleNN model format |
+| `src/config.h` | Added `NN_INPUT_SIZE`, `NN_HIDDEN_SIZE`, `NN_MAX_CLASSES`, `MAX_MODEL_SIZE` |
+| `platformio.ini` | Removed TFLite library dependency |
+| `tflite_debug.cpp` | No longer needed (kept for reference) |
+
+### Web App Files Changed
+
+| File | Change |
+|------|--------|
+| `trainingService.ts` | Changed CNN → Flatten+Dense architecture |
+| `modelExportService.ts` | Extract raw weights (no TFLite conversion) |
+| `bleModelUploadService.ts` | Upload SimpleNN weight format |
+| `constants.ts` | Added `NN_INPUT_SIZE`, `NN_HIDDEN_SIZE`, `NN_MAX_CLASSES` |
+
+### Binary Format
+
+SimpleNN weights are just packed float32 arrays:
+
+```
+[hiddenWeights: 32×600 floats]  // 76,800 bytes
+[hiddenBiases: 32 floats]        // 128 bytes
+[outputWeights: N×32 floats]     // N×128 bytes
+[outputBiases: N floats]         // N×4 bytes
+```
+
+Total: ~77-78 KB depending on number of classes
+
+### Why This Works
+
+1. **No conversion needed**: Web app extracts TF.js weights directly
+2. **Same architecture**: Both TF.js and Arduino use identical layer structure
+3. **Same math**: ReLU, softmax, matrix multiply - the basics of neural networks
+4. **Readable code**: Students can see exactly what's happening
+5. **Educational value**: Understanding how NN inference works is more valuable than using a black box!
+
+### Documentation
+
+See `docs/NEURAL_NETWORK_BASICS.md` for a complete explanation of:
+- What is a neuron?
+- How weights and biases work
+- What ReLU and softmax do
+- How prediction works
+- Why SimpleNN is perfect for education

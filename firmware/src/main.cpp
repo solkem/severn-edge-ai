@@ -193,17 +193,17 @@ void handleModelUpload() {
             UploadStatus result = finalizeModelUpload(uploadExpectedCrc);
             
             if (result == STATUS_SUCCESS) {
-                DEBUG_PRINTLN("Model saved! Reloading...");
+                DEBUG_PRINTLN("Model saved! Reloading into SimpleNN...");
                 updateModelStatus(UPLOAD_COMPLETE, 100, STATUS_SAVING);
                 
-                // Reload the model into TFLite interpreter
+                // Reload the model into SimpleNN inference engine
                 if (reloadModel()) {
                     updateModelStatus(UPLOAD_COMPLETE, 100, STATUS_SUCCESS);
                     updateDeviceInfo();  // Update device info with new model status
-                    DEBUG_PRINTLN("Model reload successful!");
+                    DEBUG_PRINTLN("SimpleNN model reload successful!");
                 } else {
                     updateModelStatus(UPLOAD_ERROR, 100, STATUS_ERROR_FORMAT);
-                    DEBUG_PRINTLN("Model reload failed!");
+                    DEBUG_PRINTLN("SimpleNN model reload failed!");
                 }
             } else {
                 updateModelStatus(UPLOAD_ERROR, 100, result);

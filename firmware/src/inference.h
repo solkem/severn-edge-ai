@@ -6,13 +6,17 @@
 #include "sensor_reader.h"
 
 // ============================================================================
-// TensorFlow Lite Micro Inference Engine
+// SimpleNN Inference Engine
+// ============================================================================
+// 
+// This module uses our hand-written neural network instead of TFLite.
+// See docs/NEURAL_NETWORK_BASICS.md for educational documentation!
 // ============================================================================
 
-// Initialize the TFLite interpreter with the model from flash
+// Initialize the inference engine
 bool setupInference();
 
-// Reload model from flash (called after BLE upload)
+// Reload model from storage (called after BLE upload)
 bool reloadModel();
 
 // Check if a valid model is loaded
@@ -20,7 +24,6 @@ bool isModelLoaded();
 
 // Add a sensor sample to the sliding window buffer
 void addSample(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz);
-
 
 // Check if we have enough samples for inference
 bool isWindowReady();
@@ -35,5 +38,8 @@ void slideWindow();
 
 // Get the current number of samples in buffer
 int getSampleCount();
+
+// Get the label for a prediction
+const char* getPredictionLabel(int classIndex);
 
 #endif // INFERENCE_H

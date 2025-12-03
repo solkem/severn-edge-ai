@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Application Constants
  * Centralized configuration for the web application
  */
@@ -40,7 +40,7 @@ export const COLLECTION_CONFIG = {
 };
 
 // ============================================================================
-// Machine Learning Model
+// Machine Learning Model (matches firmware config.h)
 // ============================================================================
 export const MODEL_CONFIG = {
   WINDOW_SIZE: 100,
@@ -50,9 +50,17 @@ export const MODEL_CONFIG = {
 };
 
 // ============================================================================
+// SimpleNN Configuration
+// MUST MATCH firmware/src/config.h values exactly!
+// ============================================================================
+export const NN_INPUT_SIZE = 600;    // 100 samples * 6 axes
+export const NN_HIDDEN_SIZE = 32;    // Hidden layer neurons
+export const NN_MAX_CLASSES = 8;     // Maximum gesture classes
+
+// ============================================================================
 // Sensor Scaling
 // ============================================================================
 export const SENSOR_SCALE = {
   ACCEL: 8192.0,
   GYRO: 16.4,
-};
+} as const;

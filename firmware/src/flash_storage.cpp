@@ -1,28 +1,34 @@
 /**
  * Flash Storage Implementation
  * 
- * Uses RAM buffer with optional persistence for trained models.
- * For production use, consider using LittleFS or the nRF52 Flash library.
+ * ============================================================================
+ * UPDATED: Now stores SimpleNN format instead of TFLite!
+ * ============================================================================
  * 
- * Note: This simplified implementation stores the model in RAM only,
- * which means it's lost on power cycle. For persistent storage on
- * nRF52840, you would need to use the internal flash API directly.
+ * Uses RAM buffer for storing trained neural network models.
+ * The model is lost on power cycle - for persistent storage on
+ * nRF52840, you would need to use the internal flash API.
+ * 
+ * See docs/NEURAL_NETWORK_BASICS.md for details on the SimpleNN format.
  */
 
 #include "flash_storage.h"
 
 // ============================================================================
-// Storage Buffer (RAM-based for now)
+// Storage Buffer (RAM-based)
 // ============================================================================
+
 // Static buffer to hold the model - persists during runtime
-static StoredModel storedModel;
+static SimpleNNModel storedModel;
 static bool hasModel = false;
 
-// RAM buffer for receiving model during upload
-static StoredModel uploadBuffer;
+// Upload buffer and state
+static uint8_t uploadBuffer[sizeof(SimpleNNModel)];
 static UploadState currentUploadState = UPLOAD_IDLE;
 static uint32_t bytesReceived = 0;
 static uint32_t expectedSize = 0;
+static uint32_t uploadNumClasses = 0;
+static char uploadLabels[NN_MAX_CLASSES][16];
 
 // ============================================================================
 // CRC32 Implementation (IEEE 802.3 polynomial)
@@ -86,7 +92,7 @@ uint32_t calculateCrc32(const uint8_t* data, size_t length) {
 // ============================================================================
 
 void initFlashStorage() {
-    DEBUG_PRINTLN("Initializing model storage...");
+    DEBUG_PRINTLN("Initializing SimpleNN model storage...");
     
     // Clear the storage on init (RAM-based, so no persistence)
     memset(&storedModel, 0, sizeof(storedModel));
@@ -95,23 +101,25 @@ void initFlashStorage() {
     currentUploadState = UPLOAD_IDLE;
     bytesReceived = 0;
     
-    DEBUG_PRINTLN("Model storage ready (RAM mode)");
+    DEBUG_PRINTLN("Model storage ready (RAM mode, SimpleNN format)");
 }
 
 bool hasStoredModel() {
-    return hasModel && storedModel.magic == FLASH_MODEL_MAGIC;
+    return hasModel && storedModel.magic == SIMPLE_NN_MAGIC;
 }
 
-const uint8_t* getStoredModelData() {
+const SimpleNNModel* getStoredSimpleNNModel() {
     if (!hasStoredModel()) {
         return nullptr;
     }
-    return storedModel.modelData;
+    return &storedModel;
 }
 
 uint32_t getStoredModelSize() {
     if (!hasStoredModel()) return 0;
-    return storedModel.modelSize;
+    // Return the size of weight data only (not the full struct)
+    return sizeof(storedModel.hiddenWeights) + sizeof(storedModel.hiddenBias) +
+           sizeof(storedModel.outputWeights) + sizeof(storedModel.outputBias);
 }
 
 uint32_t getStoredModelNumClasses() {
@@ -120,29 +128,30 @@ uint32_t getStoredModelNumClasses() {
 }
 
 const char* getStoredModelLabel(uint8_t classIndex) {
-    if (!hasStoredModel() || classIndex >= 8) {
+    if (!hasStoredModel() || classIndex >= NN_MAX_CLASSES) {
         return "Unknown";
     }
     return storedModel.labels[classIndex];
 }
 
 void beginModelUpload(uint32_t totalSize, uint32_t numClasses) {
-    DEBUG_PRINT("Beginning model upload: ");
+    DEBUG_PRINT("Beginning SimpleNN model upload: ");
     DEBUG_PRINT(totalSize);
-    DEBUG_PRINTLN(" bytes");
+    DEBUG_PRINT(" bytes, ");
+    DEBUG_PRINT(numClasses);
+    DEBUG_PRINTLN(" classes");
     
-    if (totalSize > MAX_MODEL_SIZE) {
+    if (totalSize > sizeof(uploadBuffer)) {
         DEBUG_PRINTLN("Model too large!");
         currentUploadState = UPLOAD_ERROR;
         return;
     }
     
     // Clear upload buffer
-    memset(&uploadBuffer, 0, sizeof(uploadBuffer));
-    uploadBuffer.magic = FLASH_MODEL_MAGIC;
-    uploadBuffer.modelSize = totalSize;
-    uploadBuffer.numClasses = numClasses;
+    memset(uploadBuffer, 0, sizeof(uploadBuffer));
+    memset(uploadLabels, 0, sizeof(uploadLabels));
     
+    uploadNumClasses = numClasses;
     bytesReceived = 0;
     expectedSize = totalSize;
     currentUploadState = UPLOAD_RECEIVING;
@@ -154,14 +163,14 @@ bool receiveModelChunk(const uint8_t* data, uint16_t length, uint32_t offset) {
         return false;
     }
     
-    if (offset + length > MAX_MODEL_SIZE) {
-        DEBUG_PRINTLN("Chunk exceeds max size");
+    if (offset + length > sizeof(uploadBuffer)) {
+        DEBUG_PRINTLN("Chunk exceeds buffer size");
         currentUploadState = UPLOAD_ERROR;
         return false;
     }
     
     // Copy chunk to buffer
-    memcpy(&uploadBuffer.modelData[offset], data, length);
+    memcpy(&uploadBuffer[offset], data, length);
     bytesReceived = offset + length;
     
     DEBUG_PRINT("Received chunk: offset=");
@@ -175,14 +184,19 @@ bool receiveModelChunk(const uint8_t* data, uint16_t length, uint32_t offset) {
 }
 
 void setModelLabel(uint8_t classIndex, const char* label) {
-    if (classIndex >= 8) return;
+    if (classIndex >= NN_MAX_CLASSES) return;
     
-    strncpy(uploadBuffer.labels[classIndex], label, 15);
-    uploadBuffer.labels[classIndex][15] = '\0';
+    strncpy(uploadLabels[classIndex], label, 15);
+    uploadLabels[classIndex][15] = '\0';
+    
+    DEBUG_PRINT("Label ");
+    DEBUG_PRINT(classIndex);
+    DEBUG_PRINT(": ");
+    DEBUG_PRINTLN(label);
 }
 
 UploadStatus finalizeModelUpload(uint32_t expectedCrc32) {
-    DEBUG_PRINTLN("Finalizing model upload...");
+    DEBUG_PRINTLN("Finalizing SimpleNN model upload...");
     
     if (currentUploadState != UPLOAD_RECEIVING) {
         return STATUS_ERROR_FORMAT;
@@ -198,25 +212,64 @@ UploadStatus finalizeModelUpload(uint32_t expectedCrc32) {
     }
     
     // Verify CRC
-    uint32_t actualCrc = calculateCrc32(uploadBuffer.modelData, uploadBuffer.modelSize);
+    uint32_t actualCrc = calculateCrc32(uploadBuffer, bytesReceived);
     if (actualCrc != expectedCrc32) {
-        DEBUG_PRINT("CRC mismatch: expected ");
+        DEBUG_PRINT("CRC mismatch: expected 0x");
         DEBUG_PRINT(expectedCrc32);
-        DEBUG_PRINT(" got ");
+        DEBUG_PRINT(" got 0x");
         DEBUG_PRINTLN(actualCrc);
         currentUploadState = UPLOAD_ERROR;
         return STATUS_ERROR_CRC;
     }
     
-    uploadBuffer.crc32 = actualCrc;
+    DEBUG_PRINTLN("CRC verified, building model structure...");
     
-    // Copy to storage
-    DEBUG_PRINTLN("Saving model to RAM...");
-    memcpy(&storedModel, &uploadBuffer, sizeof(StoredModel));
+    // Build the SimpleNNModel from received data
+    // The data is packed as: hiddenWeights, hiddenBias, outputWeights, outputBias
+    
+    storedModel.magic = SIMPLE_NN_MAGIC;
+    storedModel.numClasses = uploadNumClasses;
+    storedModel.inputSize = NN_INPUT_SIZE;
+    storedModel.hiddenSize = NN_HIDDEN_SIZE;
+    
+    // Copy weights from buffer
+    size_t offset = 0;
+    
+    // Hidden weights: [NN_HIDDEN_SIZE * NN_INPUT_SIZE] floats
+    size_t hiddenWeightsSize = NN_HIDDEN_SIZE * NN_INPUT_SIZE * sizeof(float);
+    memcpy(storedModel.hiddenWeights, &uploadBuffer[offset], hiddenWeightsSize);
+    offset += hiddenWeightsSize;
+    
+    // Hidden bias: [NN_HIDDEN_SIZE] floats
+    size_t hiddenBiasSize = NN_HIDDEN_SIZE * sizeof(float);
+    memcpy(storedModel.hiddenBias, &uploadBuffer[offset], hiddenBiasSize);
+    offset += hiddenBiasSize;
+    
+    // Output weights: [numClasses * NN_HIDDEN_SIZE] floats
+    size_t outputWeightsSize = uploadNumClasses * NN_HIDDEN_SIZE * sizeof(float);
+    memcpy(storedModel.outputWeights, &uploadBuffer[offset], outputWeightsSize);
+    offset += outputWeightsSize;
+    
+    // Output bias: [numClasses] floats
+    size_t outputBiasSize = uploadNumClasses * sizeof(float);
+    memcpy(storedModel.outputBias, &uploadBuffer[offset], outputBiasSize);
+    
+    // Copy labels
+    memcpy(storedModel.labels, uploadLabels, sizeof(uploadLabels));
+    
     hasModel = true;
-    
-    DEBUG_PRINTLN("Model saved successfully!");
     currentUploadState = UPLOAD_COMPLETE;
+    
+    DEBUG_PRINTLN("SimpleNN model saved successfully!");
+    DEBUG_PRINT("  Hidden weights: ");
+    DEBUG_PRINTLN(hiddenWeightsSize);
+    DEBUG_PRINT("  Hidden bias: ");
+    DEBUG_PRINTLN(hiddenBiasSize);
+    DEBUG_PRINT("  Output weights: ");
+    DEBUG_PRINTLN(outputWeightsSize);
+    DEBUG_PRINT("  Output bias: ");
+    DEBUG_PRINTLN(outputBiasSize);
+    
     return STATUS_SUCCESS;
 }
 

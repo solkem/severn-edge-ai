@@ -1,235 +1,308 @@
 ﻿/**
- * Model Export Service
+ * Model Export Service for SimpleNN Format
  *
- * Exports trained TensorFlow.js models to formats suitable for deployment.
+ * ============================================================================
+ * EDUCATIONAL EXPLANATION
+ * ============================================================================
  * 
- * IMPORTANT LIMITATION:
- * TensorFlow.js models cannot be directly converted to TFLite format in the browser.
- * For Arduino deployment, models must be:
- * 1. Exported as a SavedModel
- * 2. Converted to TFLite using Python (tf.lite.TFLiteConverter)
- * 3. Then uploaded via BLE or compiled into firmware
+ * This file takes your trained TensorFlow.js model and extracts the weights
+ * (the numbers the neural network learned) into a simple format that the
+ * Arduino can understand.
  * 
- * This service provides:
- * - C Header export (for embedding in firmware)
- * - Model weight extraction (for demonstration)
+ * Think of it like translating from one language to another:
+ * - TensorFlow.js speaks "JavaScript"
+ * - Arduino speaks "C++"
+ * - We need to convert the weights to a format both can understand
+ * 
+ * The SimpleNN format is just a list of numbers (floats) in a specific order:
+ * 1. Hidden layer weights (32 neurons x 600 inputs = 19,200 numbers)
+ * 2. Hidden layer biases (32 numbers)
+ * 3. Output layer weights (numClasses x 32 numbers)
+ * 4. Output layer biases (numClasses numbers)
+ * 
+ * See firmware/docs/NEURAL_NETWORK_BASICS.md for more details!
  */
 
 import * as tf from '@tensorflow/tfjs';
-import type { GestureLabel } from '../types';
+import { 
+  NN_INPUT_SIZE, 
+  NN_HIDDEN_SIZE, 
+  NN_MAX_CLASSES 
+} from '../config/constants';
 
 /**
- * Convert a TensorFlow.js model to a C header file for Arduino
- *
- * This extracts model weights and formats them as a C array.
- * Note: This is a simplified format, not a true TFLite model.
- */
-export async function exportModelToHeader(
-  model: tf.LayersModel,
-  labels: GestureLabel[],
-  modelName: string = 'trained_model'
-): Promise<string> {
-  // Get model weights as typed arrays
-  const weightData = await getModelWeightsAsBytes(model);
-
-  // Generate C header file content
-  const header = generateCHeader(weightData, labels, modelName);
-
-  return header;
-}
-
-/**
- * Extract all model weights as a single byte array
+ * SimpleNN Weight Structure
  * 
- * NOTE: This extracts raw weights, NOT a valid TFLite model.
- * The Arduino firmware's TFLite Micro interpreter cannot use this directly.
+ * This matches exactly what the Arduino expects.
+ * See firmware/src/simple_nn.h for the C++ side.
  */
-async function getModelWeightsAsBytes(model: tf.LayersModel): Promise<Uint8Array> {
-  // Collect all weight tensors
-  const weights: ArrayBuffer[] = [];
-
-  for (const layer of model.layers) {
-    const layerWeights = layer.getWeights();
-    for (const weight of layerWeights) {
-      const data = await weight.data();
-      // Convert Float32Array to bytes
-      weights.push(new Float32Array(data).buffer);
-    }
-  }
-
-  // Serialize the model topology and weights together
-  const modelJson = model.toJSON();
-  const jsonStr = JSON.stringify(modelJson);
-  const encoder = new TextEncoder();
-  const jsonBytes = encoder.encode(jsonStr);
-
-  // Combine topology with weight data
-  let totalSize = jsonBytes.length;
-  for (const w of weights) {
-    totalSize += w.byteLength;
-  }
-
-  const result = new Uint8Array(totalSize);
-  let offset = 0;
-
-  // Write JSON topology first
-  result.set(jsonBytes, offset);
-  offset += jsonBytes.length;
-
-  // Write weight data
-  for (const w of weights) {
-    result.set(new Uint8Array(w), offset);
-    offset += w.byteLength;
-  }
-
-  return result;
+export interface SimpleNNWeights {
+  inputSize: number;      // Should be 600 (100 samples x 6 axes)
+  hiddenSize: number;     // Should be 32 neurons
+  numClasses: number;     // 2-8 classes (the gestures you trained)
+  
+  // The actual learned weights:
+  hiddenWeights: Float32Array;  // Shape: [hiddenSize, inputSize] = [32, 600]
+  hiddenBiases: Float32Array;   // Shape: [hiddenSize] = [32]
+  outputWeights: Float32Array;  // Shape: [numClasses, hiddenSize] = [N, 32]
+  outputBiases: Float32Array;   // Shape: [numClasses] = [N]
 }
 
 /**
- * Generate C header file content from model bytes
- */
-function generateCHeader(
-  modelBytes: Uint8Array,
-  labels: GestureLabel[],
-  modelName: string
-): string {
-  const timestamp = new Date().toISOString();
-  const classNames = labels.map(l => l.name);
-
-  // Format bytes as hex array
-  const bytesPerLine = 12;
-  const hexLines: string[] = [];
-
-  for (let i = 0; i < modelBytes.length; i += bytesPerLine) {
-    const slice = modelBytes.slice(i, Math.min(i + bytesPerLine, modelBytes.length));
-    const hexValues = Array.from(slice).map(b => `0x${b.toString(16).padStart(2, '0')}`);
-    hexLines.push('    ' + hexValues.join(', ') + ',');
-  }
-
-  // Remove trailing comma from last line
-  if (hexLines.length > 0) {
-    hexLines[hexLines.length - 1] = hexLines[hexLines.length - 1].slice(0, -1);
-  }
-
-  return `/**
- * Severn Edge AI - Trained Model Header
- *
+ * Extract weights from a trained TensorFlow.js model
+ * 
  * ============================================================================
- * AUTO-GENERATED FILE - DO NOT EDIT MANUALLY
+ * HOW THIS WORKS
  * ============================================================================
- *
- * Generated: ${timestamp}
- * Classes: ${classNames.join(', ')}
- * Model Size: ${(modelBytes.length / 1024).toFixed(2)} KB
- *
- * To use this model:
- * 1. Replace the existing model.h in firmware/src/
- * 2. Rebuild and upload the firmware to your Arduino
- */
-
-#ifndef MODEL_H
-#define MODEL_H
-
-// ============================================================================
-// MODEL DATA
-// ============================================================================
-alignas(8) const unsigned char ${modelName}[] = {
-${hexLines.join('\n')}
-};
-
-const unsigned int ${modelName}_len = ${modelBytes.length};
-
-// ============================================================================
-// MODEL METADATA
-// ============================================================================
-#define MODEL_NUM_CLASSES ${labels.length}
-#define MODEL_WINDOW_SIZE 100
-#define MODEL_NUM_AXES 6
-
-// Class labels
-const char* const CLASS_LABELS[MODEL_NUM_CLASSES] = {
-${classNames.map(name => `    "${name}"`).join(',\n')}
-};
-
-#endif // MODEL_H
-`;
-}
-
-/**
- * Download a string as a file
- */
-export function downloadAsFile(content: string, filename: string, mimeType: string = 'text/plain') {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  URL.revokeObjectURL(url);
-}
-
-/**
- * Export the trained model for Arduino deployment
- */
-export async function exportForArduino(
-  model: tf.LayersModel,
-  labels: GestureLabel[]
-): Promise<void> {
-  const headerContent = await exportModelToHeader(model, labels);
-  downloadAsFile(headerContent, 'model.h', 'text/x-c');
-}
-
-/**
- * Check if we can convert to TFLite in the browser
  * 
- * Currently returns false - TFLite conversion requires Python.
- */
-export function canConvertToTFLite(): boolean {
-  return false;
-}
-
-/**
- * Get the reason why TFLite conversion isn't available
- */
-export function getTFLiteUnavailableReason(): string {
-  return 'TensorFlow.js models cannot be converted to TFLite format in the browser. ' +
-         'For over-the-air deployment, the model must first be converted using Python\'s ' +
-         'TensorFlow Lite Converter, then uploaded as a .tflite file.';
-}
-
-/**
- * Convert the model to bytes for BLE transfer
+ * After training, TensorFlow.js stores the learned weights inside the model.
+ * We need to:
+ * 1. Find the Dense layers (the layers with weights)
+ * 2. Extract the weight matrices and bias vectors
+ * 3. Transpose the weights (TF.js stores them differently than we need)
+ * 4. Package everything into our SimpleNN format
  * 
- * WARNING: This does NOT produce a valid TFLite model!
- * The Arduino's TFLite Micro interpreter will reject this data.
+ * IMPORTANT: Weight Transpose
+ * ---------------------------
+ * TensorFlow.js stores Dense layer weights as [inputSize, outputSize]
+ * But our Arduino code expects [outputSize, inputSize]
  * 
- * For actual TFLite deployment:
- * 1. Export model weights using exportForArduino()
- * 2. Use Python to convert to TFLite format
- * 3. Upload the .tflite file
+ * Example for hidden layer:
+ * - TF.js shape: [600, 32] (600 inputs going to 32 neurons)
+ * - Arduino shape: [32, 600] (32 neurons, each with 600 weights)
+ * 
+ * This is just a different way of organizing the same numbers!
  */
-export async function modelToTFLiteBytes(
-  model: tf.LayersModel,
-  _labels: GestureLabel[]
-): Promise<Uint8Array> {
-  console.warn(
-    'modelToTFLiteBytes: This function does NOT produce valid TFLite format. ' +
-    'The Arduino will reject this data. Use Python-based conversion for real deployment.'
+export function extractSimpleNNWeights(model: tf.LayersModel): SimpleNNWeights {
+  console.log('Extracting weights from trained model...');
+  console.log('Model layers:', model.layers.map(l => l.name));
+  
+  // Find the Dense layers (layers with weights)
+  const denseLayers = model.layers.filter(layer => 
+    layer.getClassName() === 'Dense'
   );
   
-  // Return raw weights (will fail TFLite validation on Arduino)
-  return await getModelWeightsAsBytes(model);
+  if (denseLayers.length < 2) {
+    throw new Error(
+      `Expected at least 2 Dense layers, found ${denseLayers.length}. ` +
+      `Your model architecture might not be compatible with SimpleNN.`
+    );
+  }
+  
+  // First Dense layer = Hidden layer
+  const hiddenLayer = denseLayers[0];
+  const [hiddenWeightsTensor, hiddenBiasesTensor] = hiddenLayer.getWeights();
+  
+  // Second Dense layer = Output layer
+  const outputLayer = denseLayers[denseLayers.length - 1];
+  const [outputWeightsTensor, outputBiasesTensor] = outputLayer.getWeights();
+  
+  // Get the shapes
+  const hiddenWeightsShape = hiddenWeightsTensor.shape;
+  const outputWeightsShape = outputWeightsTensor.shape;
+  
+  console.log(`Hidden weights shape: [${hiddenWeightsShape}] (TF.js format)`);
+  console.log(`Output weights shape: [${outputWeightsShape}] (TF.js format)`);
+  
+  const inputSize = hiddenWeightsShape[0] as number;
+  const hiddenSize = hiddenWeightsShape[1] as number;
+  const numClasses = outputWeightsShape[1] as number;
+  
+  // Validate dimensions
+  if (inputSize !== NN_INPUT_SIZE) {
+    console.warn(`Input size mismatch: model has ${inputSize}, expected ${NN_INPUT_SIZE}`);
+  }
+  if (hiddenSize !== NN_HIDDEN_SIZE) {
+    console.warn(`Hidden size mismatch: model has ${hiddenSize}, expected ${NN_HIDDEN_SIZE}`);
+  }
+  if (numClasses > NN_MAX_CLASSES) {
+    throw new Error(`Too many classes: ${numClasses}, max is ${NN_MAX_CLASSES}`);
+  }
+  
+  // Extract and transpose weights
+  // TF.js: [inputSize, hiddenSize] -> Arduino: [hiddenSize, inputSize]
+  const hiddenWeightsRaw = hiddenWeightsTensor.arraySync() as number[][];
+  const hiddenWeights = new Float32Array(hiddenSize * inputSize);
+  
+  for (let h = 0; h < hiddenSize; h++) {
+    for (let i = 0; i < inputSize; i++) {
+      // Transpose: row h, col i in Arduino = row i, col h in TF.js
+      hiddenWeights[h * inputSize + i] = hiddenWeightsRaw[i][h];
+    }
+  }
+  
+  // TF.js: [hiddenSize, numClasses] -> Arduino: [numClasses, hiddenSize]
+  const outputWeightsRaw = outputWeightsTensor.arraySync() as number[][];
+  const outputWeights = new Float32Array(numClasses * hiddenSize);
+  
+  for (let c = 0; c < numClasses; c++) {
+    for (let h = 0; h < hiddenSize; h++) {
+      // Transpose: row c, col h in Arduino = row h, col c in TF.js
+      outputWeights[c * hiddenSize + h] = outputWeightsRaw[h][c];
+    }
+  }
+  
+  // Biases don't need transposing (they're just 1D arrays)
+  const hiddenBiases = new Float32Array(hiddenBiasesTensor.dataSync());
+  const outputBiases = new Float32Array(outputBiasesTensor.dataSync());
+  
+  console.log(`Extracted weights for ${numClasses}-class classifier`);
+  console.log(`  Hidden: ${hiddenSize} neurons x ${inputSize} inputs`);
+  console.log(`  Output: ${numClasses} classes x ${hiddenSize} hidden`);
+  
+  // Clean up tensors
+  hiddenWeightsTensor.dispose();
+  hiddenBiasesTensor.dispose();
+  outputWeightsTensor.dispose();
+  outputBiasesTensor.dispose();
+  
+  return {
+    inputSize,
+    hiddenSize,
+    numClasses,
+    hiddenWeights,
+    hiddenBiases,
+    outputWeights,
+    outputBiases
+  };
 }
 
 /**
- * Load a pre-converted TFLite model file for upload
- * This is the correct way to upload a model - using a properly converted .tflite file
+ * Convert SimpleNN weights to binary format for BLE upload
+ * 
+ * The binary format is simply all the floats concatenated together:
+ * [hiddenWeights][hiddenBiases][outputWeights][outputBiases]
+ * 
+ * Each float is 4 bytes (32 bits), stored in little-endian format
+ * (which is what most computers and the Arduino use).
  */
-export async function loadTFLiteFile(file: File): Promise<Uint8Array> {
-  const arrayBuffer = await file.arrayBuffer();
-  return new Uint8Array(arrayBuffer);
+export function weightsToBytes(weights: SimpleNNWeights): Uint8Array {
+  const totalFloats = 
+    weights.hiddenWeights.length +
+    weights.hiddenBiases.length +
+    weights.outputWeights.length +
+    weights.outputBiases.length;
+  
+  const buffer = new ArrayBuffer(totalFloats * 4);
+  const view = new DataView(buffer);
+  
+  let offset = 0;
+  
+  // Helper to write a Float32Array
+  const writeFloats = (arr: Float32Array) => {
+    for (let i = 0; i < arr.length; i++) {
+      view.setFloat32(offset, arr[i], true);  // true = little-endian
+      offset += 4;
+    }
+  };
+  
+  writeFloats(weights.hiddenWeights);
+  writeFloats(weights.hiddenBiases);
+  writeFloats(weights.outputWeights);
+  writeFloats(weights.outputBiases);
+  
+  console.log(`Packed ${totalFloats} floats into ${offset} bytes`);
+  
+  return new Uint8Array(buffer);
+}
+
+/**
+ * Main function: Convert TF.js model to bytes for BLE upload
+ */
+export function modelToSimpleNNBytes(model: tf.LayersModel): Uint8Array {
+  const weights = extractSimpleNNWeights(model);
+  return weightsToBytes(weights);
+}
+
+/**
+ * Calculate CRC32 checksum
+ * 
+ * CRC = Cyclic Redundancy Check
+ * 
+ * This is like a "fingerprint" of the data. If even one byte is wrong
+ * during transmission, the CRC will be different, and we'll know
+ * something went wrong.
+ * 
+ * The Arduino calculates the same CRC and compares it to make sure
+ * all the weight data arrived correctly.
+ */
+export function calculateCrc32(data: Uint8Array): number {
+  // CRC32 lookup table (pre-computed for speed)
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) {
+      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c;
+  }
+  
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < data.length; i++) {
+    crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+  }
+  
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+/**
+ * Export model as a C header file
+ * 
+ * This is useful for embedding a pre-trained model directly in the firmware,
+ * instead of uploading over BLE. Good for:
+ * - Default models
+ * - Testing
+ * - Offline deployment
+ */
+export function exportModelToHeader(
+  weights: SimpleNNWeights,
+  modelName: string = 'default_model'
+): string {
+  const bytes = weightsToBytes(weights);
+  const crc = calculateCrc32(bytes);
+  
+  const bytesPerLine = 12;
+  let hexArray = '';
+  
+  for (let i = 0; i < bytes.length; i++) {
+    if (i % bytesPerLine === 0) {
+      hexArray += '  ';
+    }
+    hexArray += `0x${bytes[i].toString(16).padStart(2, '0')}`;
+    if (i < bytes.length - 1) {
+      hexArray += ', ';
+    }
+    if ((i + 1) % bytesPerLine === 0) {
+      hexArray += '\n';
+    }
+  }
+  
+  return `/**
+ * Auto-generated SimpleNN Model
+ * 
+ * Model: ${modelName}
+ * Classes: ${weights.numClasses}
+ * Size: ${bytes.length} bytes
+ * CRC32: 0x${crc.toString(16).toUpperCase()}
+ * 
+ * Generated by SimpleNN Export Service
+ */
+
+#ifndef ${modelName.toUpperCase()}_H
+#define ${modelName.toUpperCase()}_H
+
+#include <stdint.h>
+
+#define ${modelName.toUpperCase()}_INPUT_SIZE ${weights.inputSize}
+#define ${modelName.toUpperCase()}_HIDDEN_SIZE ${weights.hiddenSize}
+#define ${modelName.toUpperCase()}_NUM_CLASSES ${weights.numClasses}
+#define ${modelName.toUpperCase()}_SIZE ${bytes.length}
+#define ${modelName.toUpperCase()}_CRC32 0x${crc.toString(16).toUpperCase()}
+
+const uint8_t ${modelName}_data[${bytes.length}] PROGMEM = {
+${hexArray}
+};
+
+#endif // ${modelName.toUpperCase()}_H
+`;
 }

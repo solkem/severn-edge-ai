@@ -1,48 +1,46 @@
 /**
- * Severn Edge AI - TensorFlow Lite Micro Inference Engine
+ * Severn Edge AI - SimpleNN Inference Engine
  * 
- * This module handles on-device gesture recognition using a trained
- * TFLite model uploaded via BLE and stored in flash memory.
+ * ============================================================================
+ * EDUCATIONAL IMPLEMENTATION - No TensorFlow Required!
+ * ============================================================================
+ * 
+ * This module uses our hand-written neural network (SimpleNN) instead of
+ * TensorFlow Lite. Students can see exactly what happens during inference!
+ * 
+ * See docs/NEURAL_NETWORK_BASICS.md for a full explanation of:
+ *   - What neural networks are
+ *   - How matrix multiplication works
+ *   - What activation functions do
+ *   - Why we built our own instead of using TFLite
  */
 
 #include "inference.h"
 #include "flash_storage.h"
-
-// TensorFlow Lite Micro headers
-#include <TensorFlowLite.h>
-#include <tensorflow/lite/micro/all_ops_resolver.h>
-#include <tensorflow/lite/micro/micro_interpreter.h>
-#include <tensorflow/lite/schema/schema_generated.h>
-
-// Forward declaration
-bool loadModelFromFlash();
+#include "simple_nn.h"
 
 // ============================================================================
 // Sliding Window Buffer
+// ============================================================================
+// We collect 100 samples of sensor data (at 25Hz = 4 seconds)
+// Each sample has 6 values: ax, ay, az, gx, gy, gz
+// Total: 100 × 6 = 600 input values to the neural network
 // ============================================================================
 static float sampleBuffer[WINDOW_SIZE][6];  // 100 samples × 6 axes (normalized)
 static int sampleIndex = 0;
 
 // ============================================================================
-// TensorFlow Lite Micro Objects
+// SimpleNN Instance
 // ============================================================================
-static const tflite::Model* model = nullptr;
-static tflite::MicroInterpreter* interpreter = nullptr;
-static TfLiteTensor* input = nullptr;
-static TfLiteTensor* output = nullptr;
+static SimpleNN neuralNetwork;
 
-// Memory arena for TFLite (must be aligned)
-alignas(16) static uint8_t tensor_arena[TENSOR_ARENA_SIZE];
-
-// All operations resolver
-static tflite::AllOpsResolver resolver;
-
-// Flag to track if model is valid
-static bool modelLoaded = false;
-static uint32_t loadedModelNumClasses = 0;
+// ============================================================================
+// SETUP
+// ============================================================================
 
 bool setupInference() {
-    DEBUG_PRINTLN("Setting up TFLite Micro inference...");
+    DEBUG_PRINTLN("Setting up SimpleNN inference engine...");
+    DEBUG_PRINTLN("(See docs/NEURAL_NETWORK_BASICS.md for how this works!)");
 
     // Reset buffer
     sampleIndex = 0;
@@ -51,91 +49,60 @@ bool setupInference() {
     // Initialize flash storage
     initFlashStorage();
 
-    // Check if we have a model stored in flash
+    // Check if we have a model stored
     if (!hasStoredModel()) {
-        DEBUG_PRINTLN("No model in flash - waiting for BLE upload");
-        modelLoaded = false;
+        DEBUG_PRINTLN("No model stored - waiting for BLE upload from web app");
         return true;  // Continue in fallback mode
     }
 
-    return loadModelFromFlash();
-}
-
-bool loadModelFromFlash() {
-    DEBUG_PRINTLN("Loading model from flash...");
-
-    const uint8_t* modelData = getStoredModelData();
-    if (modelData == nullptr) {
-        DEBUG_PRINTLN("Failed to read model from flash");
-        modelLoaded = false;
-        return false;
-    }
-
-    uint32_t modelSize = getStoredModelSize();
-    DEBUG_PRINT("Model size: ");
-    DEBUG_PRINT(modelSize);
-    DEBUG_PRINTLN(" bytes");
-
-    // Load the model
-    model = tflite::GetModel(modelData);
-    if (model->version() != TFLITE_SCHEMA_VERSION) {
-        DEBUG_PRINT("Model schema version mismatch: ");
-        DEBUG_PRINT(model->version());
-        DEBUG_PRINT(" vs ");
-        DEBUG_PRINTLN(TFLITE_SCHEMA_VERSION);
-        modelLoaded = false;
-        return false;
-    }
-
-    // Create interpreter
-    static tflite::MicroInterpreter static_interpreter(
-        model, resolver, tensor_arena, TENSOR_ARENA_SIZE);
-    interpreter = &static_interpreter;
-
-    // Allocate tensors
-    TfLiteStatus allocate_status = interpreter->AllocateTensors();
-    if (allocate_status != kTfLiteOk) {
-        DEBUG_PRINTLN("AllocateTensors() failed!");
-        modelLoaded = false;
-        return false;
-    }
-
-    // Get input and output tensors
-    input = interpreter->input(0);
-    output = interpreter->output(0);
-
-    // Store number of classes from flash metadata
-    loadedModelNumClasses = getStoredModelNumClasses();
-
-    DEBUG_PRINTLN("TFLite Micro initialized successfully!");
-    DEBUG_PRINT("Arena used: ");
-    DEBUG_PRINT(interpreter->arena_used_bytes());
-    DEBUG_PRINT(" bytes, Classes: ");
-    DEBUG_PRINTLN(loadedModelNumClasses);
-
-    modelLoaded = true;
-    return true;
+    return reloadModel();
 }
 
 bool reloadModel() {
-    // Called after a new model is uploaded via BLE
-    DEBUG_PRINTLN("Reloading model after BLE upload...");
-    return loadModelFromFlash();
+    DEBUG_PRINTLN("Loading SimpleNN model from storage...");
+
+    const SimpleNNModel* modelData = getStoredSimpleNNModel();
+    if (modelData == nullptr) {
+        DEBUG_PRINTLN("Failed to get model from storage");
+        return false;
+    }
+
+    if (!neuralNetwork.loadModel(modelData)) {
+        DEBUG_PRINTLN("Failed to load model into SimpleNN");
+        return false;
+    }
+
+    DEBUG_PRINTLN("SimpleNN model loaded successfully!");
+    DEBUG_PRINT("  Classes: ");
+    DEBUG_PRINTLN(neuralNetwork.getNumClasses());
+    
+    // Print class labels
+    for (uint32_t i = 0; i < neuralNetwork.getNumClasses(); i++) {
+        DEBUG_PRINT("    ");
+        DEBUG_PRINT(i);
+        DEBUG_PRINT(": ");
+        DEBUG_PRINTLN(neuralNetwork.getLabel(i));
+    }
+
+    return true;
 }
 
 bool isModelLoaded() {
-    return modelLoaded;
+    return neuralNetwork.isModelLoaded();
 }
 
+// ============================================================================
+// SAMPLE COLLECTION
+// ============================================================================
 
 void addSample(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz) {
     if (sampleIndex < WINDOW_SIZE) {
-        // Normalize values: convert from int16 back to physical units
-        // These should match the normalization used during training
+        // Normalize values to approximately -1 to +1 range
+        // This matches what the web app does during training
         sampleBuffer[sampleIndex][0] = (float)ax / ACCEL_SCALE;
         sampleBuffer[sampleIndex][1] = (float)ay / ACCEL_SCALE;
         sampleBuffer[sampleIndex][2] = (float)az / ACCEL_SCALE;
-        sampleBuffer[sampleIndex][3] = (float)gx / GYRO_SCALE / 100.0f;  // Scale gyro to similar range
+        sampleBuffer[sampleIndex][3] = (float)gx / GYRO_SCALE / 100.0f;
         sampleBuffer[sampleIndex][4] = (float)gy / GYRO_SCALE / 100.0f;
         sampleBuffer[sampleIndex][5] = (float)gz / GYRO_SCALE / 100.0f;
         sampleIndex++;
@@ -146,63 +113,76 @@ bool isWindowReady() {
     return sampleIndex >= WINDOW_SIZE;
 }
 
+int getSampleCount() {
+    return sampleIndex;
+}
+
+// ============================================================================
+// INFERENCE
+// ============================================================================
+
 int runInference(float* confidence) {
     if (!isWindowReady()) {
         *confidence = 0.0f;
         return -1;
     }
 
-    // Fallback mode when no real model is loaded
-    if (!modelLoaded || interpreter == nullptr) {
-        DEBUG_PRINTLN("Running inference (fallback mode - no trained model)");
+    // ========================================================================
+    // Fallback Mode (no model loaded)
+    // ========================================================================
+    if (!neuralNetwork.isModelLoaded()) {
+        DEBUG_PRINTLN("Inference (fallback mode - no trained model)");
         *confidence = 0.50f;
         return 0;
     }
 
-    // Copy buffer to input tensor
-    float* input_data = input->data.f;
+    // ========================================================================
+    // FLATTEN the 2D sample buffer into 1D input array
+    // ========================================================================
+    // The neural network expects a flat array of 600 values:
+    //   [ax0, ay0, az0, gx0, gy0, gz0, ax1, ay1, az1, gx1, ...]
+    // ========================================================================
+    float flatInput[WINDOW_SIZE * 6];
     for (int i = 0; i < WINDOW_SIZE; i++) {
         for (int j = 0; j < 6; j++) {
-            input_data[i * 6 + j] = sampleBuffer[i][j];
+            flatInput[i * 6 + j] = sampleBuffer[i][j];
         }
     }
 
-    // Run inference
-    TfLiteStatus invoke_status = interpreter->Invoke();
-    if (invoke_status != kTfLiteOk) {
-        DEBUG_PRINTLN("Invoke() failed!");
-        *confidence = 0.0f;
-        return -1;
-    }
+    // ========================================================================
+    // RUN THE NEURAL NETWORK
+    // ========================================================================
+    // This is where the magic happens! Inside predict():
+    //   1. Matrix multiply: input × hidden_weights + hidden_bias
+    //   2. Apply ReLU activation
+    //   3. Matrix multiply: hidden × output_weights + output_bias
+    //   4. Apply softmax to get probabilities
+    //   5. Return the class with highest probability
+    // ========================================================================
+    float probabilities[NN_MAX_CLASSES];
+    int prediction = neuralNetwork.predict(flatInput, probabilities);
+    
+    *confidence = neuralNetwork.getLastConfidence();
 
-    // Get output probabilities
-    float* probabilities = output->data.f;
-    int numClasses = output->dims->data[1];
+    // Print result
+    DEBUG_PRINT("Prediction: ");
+    DEBUG_PRINT(prediction);
+    DEBUG_PRINT(" (");
+    DEBUG_PRINT(neuralNetwork.getLabel(prediction));
+    DEBUG_PRINT(") confidence: ");
+    DEBUG_PRINT((int)(*confidence * 100));
+    DEBUG_PRINTLN("%");
 
-    // Find class with highest probability
-    int bestClass = 0;
-    float bestProb = probabilities[0];
-    for (int i = 1; i < numClasses; i++) {
-        if (probabilities[i] > bestProb) {
-            bestProb = probabilities[i];
-            bestClass = i;
-        }
-    }
-
-    *confidence = bestProb;
-
-    DEBUG_PRINT("Inference: class=");
-    DEBUG_PRINT(bestClass);
-    if (bestClass < (int)loadedModelNumClasses) {
-        DEBUG_PRINT(" (");
-        DEBUG_PRINT(getStoredModelLabel(bestClass));
-        DEBUG_PRINT(")");
-    }
-    DEBUG_PRINT(" conf=");
-    DEBUG_PRINTLN((int)(bestProb * 100));
-
-    return bestClass;
+    return prediction;
 }
+
+const char* getPredictionLabel(int classIndex) {
+    return neuralNetwork.getLabel(classIndex);
+}
+
+// ============================================================================
+// SLIDING WINDOW
+// ============================================================================
 
 void slideWindow() {
     // Keep the last (WINDOW_SIZE - WINDOW_STRIDE) samples
@@ -217,8 +197,4 @@ void slideWindow() {
 
     // Reset index to continue filling from kept samples
     sampleIndex = keep;
-}
-
-int getSampleCount() {
-    return sampleIndex;
 }

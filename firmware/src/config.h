@@ -29,9 +29,26 @@
 // ============================================================================
 // MODEL STORAGE CONFIGURATION
 // ============================================================================
-#define MAX_MODEL_SIZE (20 * 1024)    // 20KB max model size
+// Note: We now use SimpleNN format instead of TFLite!
+// See docs/NEURAL_NETWORK_BASICS.md for details
 #define MODEL_CHUNK_SIZE 240          // BLE MTU-safe chunk size
-#define FLASH_MODEL_MAGIC 0x4D4C5446  // "TFLM" magic number
+
+// ============================================================================
+// SIMPLENN CONFIGURATION  
+// ============================================================================
+// These MUST match the web app's training service!
+// Architecture: Input(600) → Dense(32, relu) → Dense(N, softmax)
+#define NN_INPUT_SIZE 600             // 100 samples × 6 axes = 600
+#define NN_HIDDEN_SIZE 32             // Hidden layer neurons
+#define NN_MAX_CLASSES 8              // Maximum gesture classes
+
+// Model weight buffer sizes
+// hiddenWeights: 32 × 600 = 19,200 floats = 76,800 bytes
+// hiddenBiases: 32 floats = 128 bytes
+// outputWeights: 8 × 32 = 256 floats = 1,024 bytes (max)
+// outputBiases: 8 floats = 32 bytes (max)
+// Total max: ~78 KB
+#define MAX_MODEL_SIZE 85000          // ~83 KB buffer for SimpleNN weights
 
 // ============================================================================
 // SENSOR CONFIGURATION
@@ -49,7 +66,6 @@
 // ============================================================================
 #define WINDOW_SIZE 100       // Number of samples in sliding window
 #define WINDOW_STRIDE 50      // Samples to slide after inference
-#define TENSOR_ARENA_SIZE (12 * 1024)  // 12KB for TFLite model
 #define NUM_CLASSES 3         // Default number of gesture classes
 
 // ============================================================================
