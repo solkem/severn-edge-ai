@@ -299,3 +299,7 @@ export class BLEModelUploadService {
 }
 
 // Export singleton instance
+
+
+// Singleton instance
+export const bleModelUploadService = new BLEModelUploadService();

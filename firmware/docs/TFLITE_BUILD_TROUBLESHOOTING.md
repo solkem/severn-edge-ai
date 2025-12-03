@@ -176,6 +176,7 @@ await this.delay(1000); // Was 500ms
 | 3 | Undeclared function | Called before definition | Add forward declaration |
 | 4 | Undefined reference | Platform-specific functions not implemented | Create `tflite_debug.cpp` with implementations |
 | 5 | GATT Error Unknown | BLE write mode mismatch | Add `BLEWriteWithoutResponse` flag + use `writeValueWithResponse()` |
+| 6 | Status code 13 (FORMAT) | TF.js models aren't TFLite format | Use C header export or Python conversion |
 
 ---
 
@@ -187,3 +188,56 @@ await this.delay(1000); // Was 500ms
 4. **TFLite Micro is platform-agnostic** - You must implement platform-specific functions like `DebugLog`
 5. **BLE writes need proper permissions** - Use `BLEWrite | BLEWriteWithoutResponse` for Web Bluetooth compatibility
 6. **Use writeValueWithResponse() for reliability** - Especially for multi-packet transfers like model uploads
+7. **TensorFlow.js ≠ TFLite** - Browser-based models cannot be directly converted to TFLite format
+
+---
+
+## Problem 6: "Upload failed with status code: 13" (STATUS_ERROR_FORMAT)
+
+**Error:**
+```
+Upload failed with status code: 13
+BLE upload failed: Error: Upload failed with status code: 13
+```
+
+**Root Cause:**
+Status code 13 is `STATUS_ERROR_FORMAT`, which means the model data was successfully transferred via BLE but **failed validation when TFLite Micro tried to load it**.
+
+The web app's `modelToTFLiteBytes()` function was extracting raw TensorFlow.js model weights and JSON topology, but this is **NOT a valid TFLite flatbuffer format**. 
+
+**Key insight:** TensorFlow.js models cannot be directly converted to TFLite format in the browser. TFLite conversion requires:
+1. Python with TensorFlow installed
+2. Converting the model using `tf.lite.TFLiteConverter`
+3. Quantization and optimization for microcontrollers
+
+**The data flow expected vs actual:**
+
+| Step | Expected | Actual (Bug) |
+|------|----------|--------------|
+| Web app trains model | ✅ TF.js model | ✅ TF.js model |
+| Convert to TFLite | ❌ Requires Python | ❌ Just extracted raw weights |
+| Upload via BLE | ✅ .tflite bytes | ❌ JSON + float arrays |
+| Arduino loads model | ❌ Invalid format | ❌ Rejected by TFLite Micro |
+
+**Solution:**
+
+### Current Workaround
+For this educational project, the proper workflow is:
+
+1. **Train the model** in the web app
+2. **Export as C header** (`model.h`) for firmware embedding
+3. **Rebuild firmware** with the new model.h
+4. **Upload firmware** via USB
+
+### For True Over-The-Air Deployment
+A production solution would require:
+1. A server-side Python service to convert TF.js → TFLite
+2. Or pre-converted .tflite models uploaded via a file picker
+3. The `loadTFLiteFile()` function was added to support uploading pre-converted .tflite files
+
+### Code Changes
+Updated `modelExportService.ts` to:
+- Add clear warnings about the TFLite limitation
+- Add `canConvertToTFLite()` and `getTFLiteUnavailableReason()` helper functions
+- Add `loadTFLiteFile()` for loading pre-converted .tflite files
+- Add console warnings when `modelToTFLiteBytes()` is called
