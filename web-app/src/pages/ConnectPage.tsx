@@ -31,7 +31,15 @@ export function ConnectPage({ onConnected }: ConnectPageProps) {
       onConnected(info);
     } catch (err) {
       console.error('Connection failed:', err);
-      setError(err instanceof Error ? err.message : 'Failed to connect to device');
+      const message = err instanceof Error ? err.message : 'Failed to connect to device';
+      
+      // Handle user cancellation gracefully
+      if (message.includes('User cancelled') || message.includes('User canceled')) {
+        setError(null); // Don't show error for cancellation
+      } else {
+        setError(message);
+      }
+      
       setIsConnecting(false);
     }
   };

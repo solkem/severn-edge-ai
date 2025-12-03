@@ -4,7 +4,8 @@
  */
 
 import type { SensorPacket, DeviceInfo, InferenceResult } from '../types/ble';
-import { BLE_CONFIG, DeviceMode } from '../types/ble';
+import { DeviceMode } from '../types/ble';
+import { BLE_CONFIG } from '../config/constants';
 import { parseSensorPacket, parseDeviceInfo, parseInferenceResult } from './bleParser';
 
 export type SensorDataCallback = (packet: SensorPacket) => void;

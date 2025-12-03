@@ -18,10 +18,12 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
   const [isDone, setIsDone] = useState(false);
   const [progress, setProgress] = useState<TrainingProgress | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [trainingService] = useState(() => new TrainingService());
 
   const handleTrain = async () => {
     setIsTraining(true);
+    setError(null);
 
     try {
       const result = await trainingService.train(samples, labels, (prog) => {
@@ -34,7 +36,7 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
       console.log('Training complete:', result);
     } catch (err) {
       console.error('Training failed:', err);
-      alert('Training failed! ' + (err instanceof Error ? err.message : 'Unknown error'));
+      setError(err instanceof Error ? err.message : 'Unknown error');
       setIsTraining(false);
     }
   };
@@ -78,6 +80,13 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
                   ))}
                 </div>
               </div>
+
+              {error && (
+                <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6 text-left">
+                  <h3 className="font-bold text-red-900 mb-2">Training Failed</h3>
+                  <p className="text-red-800">{error}</p>
+                </div>
+              )}
 
               <button onClick={handleTrain} className="btn-primary text-xl w-full py-4">
                 🚀 Start Training

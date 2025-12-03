@@ -7,13 +7,12 @@ import { GestureLabel } from '../types';
 import { TrainingService } from '../services/trainingService';
 import { SensorPacket } from '../types/ble';
 import { getBLEService } from '../services/bleService';
+import { MODEL_CONFIG } from '../config/constants';
 
 interface TestPageProps {
   labels: GestureLabel[];
   trainingService: TrainingService;
 }
-
-const WINDOW_SIZE = 100;
 
 export function TestPage({ labels, trainingService }: TestPageProps) {
   const [isRunning, setIsRunning] = useState(false);
@@ -48,9 +47,9 @@ export function TestPage({ labels, trainingService }: TestPageProps) {
       ]);
 
       // Run inference when we have enough samples
-      if (sampleBuffer.current.length >= WINDOW_SIZE) {
+      if (sampleBuffer.current.length >= MODEL_CONFIG.WINDOW_SIZE) {
         const { prediction, confidence } = trainingService.predict(
-          sampleBuffer.current.slice(-WINDOW_SIZE)
+          sampleBuffer.current.slice(-MODEL_CONFIG.WINDOW_SIZE)
         );
 
         setCurrentPrediction(prediction);
@@ -60,7 +59,7 @@ export function TestPage({ labels, trainingService }: TestPageProps) {
         setPredictionHistory((prev) => [...prev.slice(-19), prediction]);
 
         // Slide window (keep last 50 samples for overlap)
-        sampleBuffer.current = sampleBuffer.current.slice(-50);
+        sampleBuffer.current = sampleBuffer.current.slice(-MODEL_CONFIG.WINDOW_STRIDE);
       }
     });
   };

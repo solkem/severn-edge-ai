@@ -4,7 +4,7 @@
  */
 
 import type { SensorPacket, DeviceInfo, InferenceResult } from '../types/ble';
-import { ACCEL_SCALE, GYRO_SCALE } from '../types/ble';
+import { SENSOR_SCALE } from '../config/constants';
 import { validatePacketCRC } from '../utils/crc8';
 
 // ============================================================================
@@ -42,12 +42,12 @@ export function parseSensorPacket(data: DataView): SensorPacket | null {
 
   // Parse packet
   const packet: SensorPacket = {
-    ax: readInt16LE(data, 0) / ACCEL_SCALE,
-    ay: readInt16LE(data, 2) / ACCEL_SCALE,
-    az: readInt16LE(data, 4) / ACCEL_SCALE,
-    gx: readInt16LE(data, 6) / GYRO_SCALE,
-    gy: readInt16LE(data, 8) / GYRO_SCALE,
-    gz: readInt16LE(data, 10) / GYRO_SCALE,
+    ax: readInt16LE(data, 0) / SENSOR_SCALE.ACCEL,
+    ay: readInt16LE(data, 2) / SENSOR_SCALE.ACCEL,
+    az: readInt16LE(data, 4) / SENSOR_SCALE.ACCEL,
+    gx: readInt16LE(data, 6) / SENSOR_SCALE.GYRO,
+    gy: readInt16LE(data, 8) / SENSOR_SCALE.GYRO,
+    gz: readInt16LE(data, 10) / SENSOR_SCALE.GYRO,
     sequence: readUint16LE(data, 12),
     timestamp: readUint16LE(data, 14),
     crc: data.getUint8(16),

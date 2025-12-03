@@ -5,9 +5,9 @@
 
 import * as tf from '@tensorflow/tfjs';
 import type { Sample, GestureLabel, TrainingProgress, TrainingResult } from '../types';
+import { MODEL_CONFIG } from '../config/constants';
 
-const WINDOW_SIZE = 100;
-const INPUT_SHAPE = [WINDOW_SIZE, 6]; // 100 samples × 6 axes
+const INPUT_SHAPE = [MODEL_CONFIG.WINDOW_SIZE, MODEL_CONFIG.NUM_AXES];
 
 export class TrainingService {
   private model: tf.LayersModel | null = null;
@@ -93,17 +93,17 @@ export class TrainingService {
     const ys: number[] = [];
 
     for (const sample of samples) {
-      // Ensure sample has exactly WINDOW_SIZE samples
-      if (sample.data.length < WINDOW_SIZE) {
+      // Ensure sample has exactly MODEL_CONFIG.WINDOW_SIZE samples
+      if (sample.data.length < MODEL_CONFIG.WINDOW_SIZE) {
         // Pad with zeros
         const padded = [...sample.data];
-        while (padded.length < WINDOW_SIZE) {
+        while (padded.length < MODEL_CONFIG.WINDOW_SIZE) {
           padded.push([0, 0, 0, 0, 0, 0]);
         }
-        xs.push(padded.slice(0, WINDOW_SIZE));
-      } else if (sample.data.length > WINDOW_SIZE) {
+        xs.push(padded.slice(0, MODEL_CONFIG.WINDOW_SIZE));
+      } else if (sample.data.length > MODEL_CONFIG.WINDOW_SIZE) {
         // Truncate
-        xs.push(sample.data.slice(0, WINDOW_SIZE));
+        xs.push(sample.data.slice(0, MODEL_CONFIG.WINDOW_SIZE));
       } else {
         xs.push(sample.data);
       }
@@ -135,7 +135,7 @@ export class TrainingService {
     const { xTensor, yTensor } = this.prepareData(samples, labels);
 
     // Training configuration
-    const epochs = 50;
+    const epochs = MODEL_CONFIG.EPOCHS;
     const batchSize = 8;
     const validationSplit = 0.2;
 
@@ -241,13 +241,13 @@ export class TrainingService {
 
     // Prepare input
     let input = sampleData;
-    if (input.length < WINDOW_SIZE) {
+    if (input.length < MODEL_CONFIG.WINDOW_SIZE) {
       input = [...input];
-      while (input.length < WINDOW_SIZE) {
+      while (input.length < MODEL_CONFIG.WINDOW_SIZE) {
         input.push([0, 0, 0, 0, 0, 0]);
       }
-    } else if (input.length > WINDOW_SIZE) {
-      input = input.slice(0, WINDOW_SIZE);
+    } else if (input.length > MODEL_CONFIG.WINDOW_SIZE) {
+      input = input.slice(0, MODEL_CONFIG.WINDOW_SIZE);
     }
 
     // Run prediction

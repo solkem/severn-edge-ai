@@ -7,18 +7,15 @@ import { getBLEService } from '../services/bleService';
 import { SensorPacket } from '../types/ble';
 import { KidFeedback, FeedbackStatus } from '../components/KidFeedback';
 import { GestureLabel, Sample } from '../types';
+import { COLLECTION_CONFIG } from '../config/constants';
 
 interface CollectPageProps {
   onComplete: (samples: Sample[], labels: GestureLabel[]) => void;
 }
 
-const SAMPLE_DURATION_MS = 4000; // 4 seconds per sample
-const SAMPLES_PER_GESTURE = 10;
-const DEFAULT_GESTURES = ['Wave', 'Shake', 'Circle'];
-
 export function CollectPage({ onComplete }: CollectPageProps) {
   const [labels, setLabels] = useState<GestureLabel[]>(
-    DEFAULT_GESTURES.map((name, idx) => ({
+    COLLECTION_CONFIG.DEFAULT_GESTURES.map((name, idx) => ({
       id: `label-${idx}`,
       name,
       sampleCount: 0,
@@ -77,11 +74,11 @@ export function CollectPage({ onComplete }: CollectPageProps) {
 
       // Update progress
       const elapsed = Date.now() - recordingStartTime.current;
-      const progress = Math.min(100, (elapsed / SAMPLE_DURATION_MS) * 100);
+      const progress = Math.min(100, (elapsed / COLLECTION_CONFIG.SAMPLE_DURATION_MS) * 100);
       setRecordingProgress(progress);
 
       // Stop when duration reached
-      if (elapsed >= SAMPLE_DURATION_MS) {
+      if (elapsed >= COLLECTION_CONFIG.SAMPLE_DURATION_MS) {
         finishRecording(labelId);
       }
     });
@@ -151,11 +148,11 @@ export function CollectPage({ onComplete }: CollectPageProps) {
   };
 
   const getRequiredSamples = () => {
-    return labels.length * SAMPLES_PER_GESTURE;
+    return labels.length * COLLECTION_CONFIG.SAMPLES_PER_GESTURE;
   };
 
   const isComplete = () => {
-    return labels.every((l) => l.sampleCount >= SAMPLES_PER_GESTURE);
+    return labels.every((l) => l.sampleCount >= COLLECTION_CONFIG.SAMPLES_PER_GESTURE);
   };
 
   const handleNext = () => {
@@ -171,7 +168,7 @@ export function CollectPage({ onComplete }: CollectPageProps) {
             📊 Collect Training Data
           </h1>
           <p className="text-gray-600">
-            Record {SAMPLES_PER_GESTURE} examples of each gesture. Hold your Arduino and perform
+            Record {COLLECTION_CONFIG.SAMPLES_PER_GESTURE} examples of each gesture. Hold your Arduino and perform
             the gesture while recording!
           </p>
           <div className="mt-4 bg-blue-50 rounded-lg p-3">
@@ -210,18 +207,18 @@ export function CollectPage({ onComplete }: CollectPageProps) {
               <div className="text-center">
                 <h3 className="text-xl font-bold text-gray-800 mb-2">{label.name}</h3>
                 <div className="text-4xl font-bold text-blue-600 mb-3">
-                  {label.sampleCount} / {SAMPLES_PER_GESTURE}
+                  {label.sampleCount} / {COLLECTION_CONFIG.SAMPLES_PER_GESTURE}
                 </div>
                 <button
                   onClick={() => startRecording(label.id)}
-                  disabled={isRecording || label.sampleCount >= SAMPLES_PER_GESTURE}
+                  disabled={isRecording || label.sampleCount >= COLLECTION_CONFIG.SAMPLES_PER_GESTURE}
                   className={`w-full ${
-                    label.sampleCount >= SAMPLES_PER_GESTURE
+                    label.sampleCount >= COLLECTION_CONFIG.SAMPLES_PER_GESTURE
                       ? 'btn-success'
                       : 'btn-primary'
                   }`}
                 >
-                  {label.sampleCount >= SAMPLES_PER_GESTURE ? '✓ Complete' : '🎯 Record'}
+                  {label.sampleCount >= COLLECTION_CONFIG.SAMPLES_PER_GESTURE ? '✓ Complete' : '🎯 Record'}
                 </button>
               </div>
             </div>
