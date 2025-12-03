@@ -65,15 +65,15 @@ export function KidFeedback({ status, message }: KidFeedbackProps) {
   const getColor = () => {
     switch (status) {
       case 'recording':
-        return 'text-blue-600';
+        return 'text-primary-600';
       case 'success':
-        return 'text-green-600';
+        return 'text-emerald-600';
       case 'retry':
-        return 'text-yellow-600';
+        return 'text-amber-600';
       case 'thinking':
-        return 'text-purple-600';
+        return 'text-violet-600';
       default:
-        return 'text-gray-600';
+        return 'text-slate-600';
     }
   };
 

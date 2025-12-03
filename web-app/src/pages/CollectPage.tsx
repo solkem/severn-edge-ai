@@ -160,83 +160,133 @@ export function CollectPage({ onComplete }: CollectPageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-teal-100 p-4">
-      <div className="max-w-4xl mx-auto py-8">
-        {/* Header */}
-        <div className="card mb-6">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">
-            📊 Collect Training Data
-          </h1>
-          <p className="text-gray-600">
-            Record {COLLECTION_CONFIG.SAMPLES_PER_GESTURE} examples of each gesture. Hold your Arduino and perform
-            the gesture while recording!
-          </p>
-          <div className="mt-4 bg-blue-50 rounded-lg p-3">
-            <div className="flex justify-between items-center">
-              <span className="font-bold text-blue-900">Progress:</span>
-              <span className="text-2xl font-bold text-blue-600">
-                {getTotalSamples()} / {getRequiredSamples()}
-              </span>
+    <div className="p-4 max-w-6xl mx-auto">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column: Instructions & Progress */}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="card bg-gradient-to-br from-white to-slate-50">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className="heading-md mb-2">
+                  📊 Collect Training Data
+                </h1>
+                <p className="text-slate-600">
+                  Record {COLLECTION_CONFIG.SAMPLES_PER_GESTURE} examples of each gesture.
+                </p>
+              </div>
+              <div className="hidden sm:block text-4xl">📸</div>
             </div>
-            <div className="mt-2 bg-blue-200 rounded-full h-4 overflow-hidden">
-              <div
-                className="bg-blue-600 h-full transition-all duration-300"
-                style={{ width: `${(getTotalSamples() / getRequiredSamples()) * 100}%` }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Feedback */}
-        {isRecording && (
-          <div className="card mb-6">
-            <KidFeedback status={feedback} />
-            <div className="mt-4 bg-gray-200 rounded-full h-6 overflow-hidden">
-              <div
-                className="bg-blue-600 h-full transition-all duration-100"
-                style={{ width: `${recordingProgress}%` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Gesture Labels */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          {labels.map((label) => (
-            <div key={label.id} className="card">
-              <div className="text-center">
-                <h3 className="text-xl font-bold text-gray-800 mb-2">{label.name}</h3>
-                <div className="text-4xl font-bold text-blue-600 mb-3">
-                  {label.sampleCount} / {COLLECTION_CONFIG.SAMPLES_PER_GESTURE}
-                </div>
-                <button
-                  onClick={() => startRecording(label.id)}
-                  disabled={isRecording || label.sampleCount >= COLLECTION_CONFIG.SAMPLES_PER_GESTURE}
-                  className={`w-full ${
-                    label.sampleCount >= COLLECTION_CONFIG.SAMPLES_PER_GESTURE
-                      ? 'btn-success'
-                      : 'btn-primary'
-                  }`}
-                >
-                  {label.sampleCount >= COLLECTION_CONFIG.SAMPLES_PER_GESTURE ? '✓ Complete' : '🎯 Record'}
-                </button>
+            
+            <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+              <div className="flex justify-between items-center mb-2">
+                <span className="font-bold text-slate-700">Total Progress</span>
+                <span className="text-xl font-bold text-primary-600">
+                  {Math.round((getTotalSamples() / getRequiredSamples()) * 100)}%
+                </span>
+              </div>
+              <div className="bg-slate-200 rounded-full h-3 overflow-hidden">
+                <div
+                  className="bg-primary-600 h-full transition-all duration-500 ease-out rounded-full"
+                  style={{ width: `${(getTotalSamples() / getRequiredSamples()) * 100}%` }}
+                />
+              </div>
+              <div className="mt-2 text-xs text-slate-500 text-right">
+                {getTotalSamples()} / {getRequiredSamples()} samples collected
               </div>
             </div>
-          ))}
+          </div>
+
+          {/* Feedback Area */}
+          <div className={`card transition-all duration-300 ${isRecording ? 'ring-4 ring-primary-200 scale-[1.02]' : ''}`}>
+            {isRecording ? (
+              <div>
+                <KidFeedback status={feedback} />
+                <div className="mt-6 bg-slate-100 rounded-full h-4 overflow-hidden border border-slate-200">
+                  <div
+                    className="bg-primary-500 h-full transition-all duration-100 ease-linear"
+                    style={{ width: `${recordingProgress}%` }}
+                  />
+                </div>
+                <p className="text-center text-sm text-slate-500 mt-2">Recording...</p>
+              </div>
+            ) : (
+              <div className="text-center py-8 text-slate-400">
+                <div className="text-6xl mb-4 opacity-50">👆</div>
+                <p className="text-lg">Select a gesture below to start recording</p>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Next Button */}
-        {isComplete() && (
-          <div className="card text-center">
-            <div className="emoji-medium mb-4">🎉</div>
-            <h2 className="text-2xl font-bold text-green-600 mb-4">
-              All data collected! Ready to train!
-            </h2>
-            <button onClick={handleNext} className="btn-success text-xl">
-              Next: Train Model →
-            </button>
+        {/* Right Column: Gesture List */}
+        <div className="space-y-4">
+          <h2 className="font-bold text-slate-700 text-lg px-2">Gestures to Learn</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3">
+            {labels.map((label) => {
+              const isComplete = label.sampleCount >= COLLECTION_CONFIG.SAMPLES_PER_GESTURE;
+              const progress = (label.sampleCount / COLLECTION_CONFIG.SAMPLES_PER_GESTURE) * 100;
+              
+              return (
+                <div 
+                  key={label.id} 
+                  className={`card p-4 transition-all duration-200 ${
+                    currentLabel === label.id 
+                      ? 'border-primary-500 ring-2 ring-primary-200 shadow-lg' 
+                      : 'hover:border-primary-200 hover:shadow-md'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-3">
+                    <h3 className="font-bold text-slate-800 text-lg">{label.name}</h3>
+                    {isComplete ? (
+                      <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-full">
+                        DONE
+                      </span>
+                    ) : (
+                      <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-full">
+                        {label.sampleCount}/{COLLECTION_CONFIG.SAMPLES_PER_GESTURE}
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="bg-slate-100 rounded-full h-2 mb-4 overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-300 ${isComplete ? 'bg-emerald-500' : 'bg-primary-500'}`}
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+
+                  <button
+                    onClick={() => startRecording(label.id)}
+                    disabled={isRecording || isComplete}
+                    className={`w-full py-2 rounded-lg font-bold text-sm transition-colors ${
+                      isComplete
+                        ? 'bg-slate-100 text-slate-400 cursor-default'
+                        : 'bg-primary-50 text-primary-700 hover:bg-primary-100 active:bg-primary-200'
+                    }`}
+                  >
+                    {isComplete ? 'Completed' : 'Record Sample'}
+                  </button>
+                </div>
+              );
+            })}
           </div>
-        )}
+
+          {/* Next Button */}
+          {isComplete() && (
+            <div className="sticky bottom-4 pt-4">
+              <div className="card bg-emerald-50 border-emerald-200 shadow-lg shadow-emerald-100/50 animate-bounce-slow">
+                <div className="text-center">
+                  <h2 className="text-xl font-bold text-emerald-800 mb-3">
+                    🎉 All Done!
+                  </h2>
+                  <button onClick={handleNext} className="btn-success w-full shadow-emerald-200">
+                    Next: Train Model →
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,15 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lexend:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
   color-scheme: light;
-  color: #213547;
-  background-color: #ffffff;
+  color: #1e293b;
+  background-color: #f8fafc;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -21,6 +23,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  @apply bg-slate-50;
 }
 
 #root {
@@ -42,41 +45,49 @@ body {
   animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* Kid-friendly button styles */
+/* Modern UI Components */
 @layer components {
+  .btn-base {
+    @apply font-display font-bold py-3 px-6 rounded-xl
+           transition-all duration-200 transform hover:-translate-y-1 active:translate-y-0
+           shadow-md hover:shadow-lg active:shadow-sm
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none
+           flex items-center justify-center gap-2;
+  }
+
   .btn-primary {
-    @apply bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg
-           transition-all transform hover:scale-105 active:scale-95 shadow-lg
-           disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none;
+    @apply btn-base bg-primary-600 hover:bg-primary-500 text-white ring-2 ring-primary-600 ring-offset-2 ring-offset-transparent;
   }
 
   .btn-secondary {
-    @apply bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg
-           transition-all transform hover:scale-105 active:scale-95 shadow-lg
-           disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none;
+    @apply btn-base bg-white hover:bg-slate-50 text-slate-700 border-2 border-slate-200 hover:border-slate-300;
   }
 
   .btn-success {
-    @apply bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg
-           transition-all transform hover:scale-105 active:scale-95 shadow-lg
-           disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none;
+    @apply btn-base bg-emerald-500 hover:bg-emerald-400 text-white ring-2 ring-emerald-500 ring-offset-2 ring-offset-transparent;
   }
 
   .btn-danger {
-    @apply bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg
-           transition-all transform hover:scale-105 active:scale-95 shadow-lg
-           disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none;
+    @apply btn-base bg-rose-500 hover:bg-rose-400 text-white ring-2 ring-rose-500 ring-offset-2 ring-offset-transparent;
   }
 
   .card {
-    @apply bg-white rounded-xl shadow-xl p-6 border-2 border-gray-200;
+    @apply bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-white/50 p-6 md:p-8;
   }
 
   .emoji-large {
-    @apply text-8xl leading-none;
+    @apply text-8xl leading-none filter drop-shadow-lg;
   }
 
   .emoji-medium {
-    @apply text-6xl leading-none;
+    @apply text-6xl leading-none filter drop-shadow-md;
+  }
+  
+  .heading-lg {
+    @apply font-display text-4xl md:text-5xl font-bold text-slate-800 tracking-tight;
+  }
+  
+  .heading-md {
+    @apply font-display text-2xl md:text-3xl font-bold text-slate-800 tracking-tight;
   }
 }

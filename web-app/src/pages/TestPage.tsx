@@ -79,114 +79,152 @@ export function TestPage({ labels, trainingService }: TestPageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-yellow-50 to-orange-100 p-4">
-      <div className="max-w-4xl mx-auto py-8">
-        {/* Header */}
-        <div className="card mb-6">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">🎯 Test Your Model</h1>
-          <p className="text-gray-600">
-            Perform gestures and watch the AI recognize them in real-time!
-          </p>
-        </div>
+    <div className="p-4 max-w-4xl mx-auto">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column: Controls & Live View */}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="card bg-gradient-to-br from-white to-slate-50">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h1 className="heading-md mb-2">🎯 Test Your Model</h1>
+                <p className="text-slate-600">
+                  Perform gestures and watch the AI recognize them!
+                </p>
+              </div>
+            </div>
 
-        {/* Controls */}
-        <div className="card mb-6 text-center">
-          {!isRunning ? (
-            <button onClick={startTesting} className="btn-primary text-xl">
-              ▶️ Start Testing
-            </button>
-          ) : (
-            <button onClick={stopTesting} className="btn-danger text-xl">
-              ⏹️ Stop Testing
-            </button>
-          )}
-        </div>
+            {/* Live Prediction Display */}
+            <div className="bg-slate-900 rounded-2xl p-8 text-center relative overflow-hidden min-h-[300px] flex flex-col items-center justify-center">
+              {/* Background Grid */}
+              <div className="absolute inset-0 opacity-10" 
+                   style={{ backgroundImage: 'radial-gradient(#fff 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
+              </div>
 
-        {/* Live Prediction */}
-        {isRunning && (
-          <>
-            <div className="card mb-6">
-              <div className="text-center">
-                <div className="text-gray-600 mb-2">Current Prediction:</div>
-                {currentPrediction !== null ? (
-                  <>
-                    <div className="text-6xl font-bold text-blue-600 mb-2">
+              {isRunning ? (
+                currentPrediction !== null ? (
+                  <div className="relative z-10 animate-in fade-in zoom-in duration-300">
+                    <div className="text-slate-400 text-sm uppercase tracking-widest mb-4 font-bold">Detected Gesture</div>
+                    <div className="text-6xl md:text-7xl font-bold text-white mb-4 tracking-tight">
                       {labels[currentPrediction].name}
                     </div>
-                    <div className="text-2xl text-gray-600">
-                      {(confidence * 100).toFixed(1)}% confident
+                    
+                    <div className="inline-flex items-center gap-2 bg-slate-800/50 rounded-full px-4 py-2 backdrop-blur-sm border border-slate-700">
+                      <div className={`w-3 h-3 rounded-full ${
+                        confidence > 0.7 ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 
+                        confidence > 0.4 ? 'bg-amber-500' : 'bg-rose-500'
+                      }`}></div>
+                      <span className="text-slate-300 font-mono">
+                        {(confidence * 100).toFixed(1)}% Confident
+                      </span>
                     </div>
 
-                    {/* Confidence bar */}
-                    <div className="mt-4 bg-gray-200 rounded-full h-6 overflow-hidden">
+                    {/* Confidence Bar */}
+                    <div className="mt-8 w-64 mx-auto bg-slate-800 rounded-full h-2 overflow-hidden">
                       <div
                         className={`h-full transition-all duration-300 ${
-                          confidence > 0.7
-                            ? 'bg-green-500'
-                            : confidence > 0.4
-                            ? 'bg-yellow-500'
-                            : 'bg-red-500'
+                          confidence > 0.7 ? 'bg-emerald-500' : 
+                          confidence > 0.4 ? 'bg-amber-500' : 'bg-rose-500'
                         }`}
                         style={{ width: `${confidence * 100}%` }}
                       />
                     </div>
-                  </>
-                ) : (
-                  <div className="text-2xl text-gray-400 py-8">
-                    Collecting samples... (need {WINDOW_SIZE})
                   </div>
-                )}
-              </div>
+                ) : (
+                  <div className="text-slate-500 animate-pulse">
+                    <div className="text-4xl mb-4">👀</div>
+                    <p>Watching for movement...</p>
+                  </div>
+                )
+              ) : (
+                <div className="text-slate-500">
+                  <div className="text-6xl mb-4 opacity-50">⏸️</div>
+                  <p className="text-lg">Ready to start?</p>
+                </div>
+              )}
             </div>
 
-            {/* Prediction History */}
-            {predictionHistory.length > 0 && (
-              <div className="card">
-                <h3 className="text-xl font-bold text-gray-800 mb-4">
-                  Prediction Distribution
-                </h3>
-                <div className="space-y-3">
-                  {labels.map((label, idx) => {
-                    const counts = getPredictionCounts();
-                    const count = counts[idx];
-                    const total = predictionHistory.length;
-                    const percentage = total > 0 ? (count / total) * 100 : 0;
+            <div className="mt-6 flex justify-center">
+              {!isRunning ? (
+                <button onClick={startTesting} className="btn-primary text-xl px-12 py-4 shadow-xl shadow-primary-200">
+                  ▶️ Start Testing
+                </button>
+              ) : (
+                <button onClick={stopTesting} className="btn-danger text-xl px-12 py-4 shadow-xl shadow-rose-200">
+                  ⏹️ Stop Testing
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
 
-                    return (
-                      <div key={label.id}>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="font-bold">{label.name}</span>
-                          <span className="text-gray-600">
-                            {count} / {total} ({percentage.toFixed(0)}%)
-                          </span>
-                        </div>
-                        <div className="bg-gray-200 rounded-full h-4 overflow-hidden">
-                          <div
-                            className="bg-blue-600 h-full transition-all duration-300"
-                            style={{ width: `${percentage}%` }}
-                          />
-                        </div>
+        {/* Right Column: Stats & History */}
+        <div className="space-y-6">
+          {/* Prediction History */}
+          <div className="card h-full">
+            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <span className="text-xl">📊</span> Distribution
+            </h3>
+            
+            {predictionHistory.length > 0 ? (
+              <div className="space-y-4">
+                {labels.map((label, idx) => {
+                  const counts = getPredictionCounts();
+                  const count = counts[idx];
+                  const total = predictionHistory.length;
+                  const percentage = total > 0 ? (count / total) * 100 : 0;
+
+                  return (
+                    <div key={label.id}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-bold text-slate-700">{label.name}</span>
+                        <span className="text-slate-500 text-xs">
+                          {count} ({percentage.toFixed(0)}%)
+                        </span>
                       </div>
-                    );
-                  })}
+                      <div className="bg-slate-100 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="bg-primary-500 h-full transition-all duration-500"
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="pt-4 mt-4 border-t border-slate-100 text-center text-xs text-slate-400">
+                  Based on last {predictionHistory.length} predictions
                 </div>
               </div>
+            ) : (
+              <div className="text-center text-slate-400 py-8 text-sm">
+                No predictions yet.
+                <br/>Start testing to see data!
+              </div>
             )}
-          </>
-        )}
-
-        {/* Instructions */}
-        {!isRunning && (
-          <div className="card bg-blue-50 border-blue-200">
-            <h3 className="font-bold text-blue-900 mb-2">Tips for Testing:</h3>
-            <ul className="list-disc list-inside text-blue-800 space-y-1">
-              <li>Hold the Arduino firmly while performing gestures</li>
-              <li>Try to match how you recorded the training samples</li>
-              <li>Green confidence = Great! Yellow = OK, Red = Try again</li>
-              <li>The AI predicts every few seconds based on recent motion</li>
-            </ul>
           </div>
-        )}
+
+          {/* Instructions */}
+          {!isRunning && (
+            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
+              <h3 className="font-bold text-blue-900 mb-3 flex items-center gap-2">
+                <span className="text-xl">💡</span> Tips
+              </h3>
+              <ul className="space-y-2 text-sm text-blue-800">
+                <li className="flex gap-2">
+                  <span className="text-blue-500">•</span>
+                  Hold the Arduino firmly
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-blue-500">•</span>
+                  Match your training moves
+                </li>
+                <li className="flex gap-2">
+                  <span className="text-blue-500">•</span>
+                  Green bar = High confidence
+                </li>
+              </ul>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
