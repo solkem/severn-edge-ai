@@ -1,4 +1,4 @@
-# Severn Edge AI v3.1
+# Severn Edge AI 
 
 Complete Machine Learning Education Platform for Arduino BLE
 
