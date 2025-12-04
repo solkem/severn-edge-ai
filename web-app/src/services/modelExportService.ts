@@ -306,3 +306,55 @@ ${hexArray}
 #endif // ${modelName.toUpperCase()}_H
 `;
 }
+
+// ============================================================================
+// LEGACY EXPORTS (for compatibility with existing UI)
+// ============================================================================
+
+import type { GestureLabel } from '../types';
+
+/**
+ * Export model as a downloadable C header file
+ */
+export async function exportForArduino(
+  model: tf.LayersModel,
+  labels: GestureLabel[]
+): Promise<void> {
+  const weights = extractSimpleNNWeights(model);
+  const labelNames = labels.map(l => l.name).join(', ');
+  const headerContent = exportModelToHeader(weights, 'gesture_model');
+  
+  const labelComment = [
+    '',
+    '// Class labels: ' + labelNames,
+    '// Label indices:'
+  ].concat(labels.map((l, i) => '//   ' + i + ': ' + l.name)).join('\n');
+  
+  const finalContent = headerContent.replace(
+    '#ifndef GESTURE_MODEL_H',
+    labelComment + '\n#ifndef GESTURE_MODEL_H'
+  );
+  
+  const blob = new Blob([finalContent], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'gesture_model.h';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  console.log('Model exported as gesture_model.h');
+}
+
+/**
+ * Legacy alias for modelToSimpleNNBytes (for backward compatibility)
+ */
+export function modelToTFLiteBytes(
+  model: tf.LayersModel,
+  _labels?: GestureLabel[]
+): Uint8Array {
+  console.log('Note: Using SimpleNN format (not TFLite)');
+  return modelToSimpleNNBytes(model);
+}
+

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * BLE Model Upload Service for SimpleNN Format
  *
  * ============================================================================
@@ -101,6 +101,8 @@ export class BLEModelUploadService {
 
     try {
       const crc32 = calculateCrc32(modelData);
+      // Debug: Show first 16 bytes being uploaded
+      
       console.log(`Starting SimpleNN upload: ${totalBytes} bytes, CRC32: 0x${crc32.toString(16)}`);
       console.log(`Classes: ${classLabels.join(', ')}`);
 
