@@ -15,7 +15,8 @@ export const BLE_CONFIG = {
   CONFIG_CHAR_UUID: '19b10005-e8f2-537e-4f6c-d104768a1214',
   MODEL_UPLOAD_UUID: '19b10006-e8f2-537e-4f6c-d104768a1214',
   MODEL_STATUS_UUID: '19b10007-e8f2-537e-4f6c-d104768a1214',
-  DEVICE_NAME_PREFIX: 'Severn School Edge AI',
+  // Device names are now unique per Arduino: "SevernEdgeAI-XXXX" where XXXX is hardware ID
+  DEVICE_NAME_PREFIX: 'SevernEdgeAI',
 } as const;
 
 // Convenience alias for BLE UUIDs

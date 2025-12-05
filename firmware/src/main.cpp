@@ -31,6 +31,38 @@ uint32_t totalSamples = 0;
 uint32_t inferenceCount = 0;
 unsigned long lastUptimeUpdate = 0;
 
+// Device name (unique per device)
+char deviceName[DEVICE_NAME_MAX_LEN];
+
+// ============================================================================
+// DEVICE ID FUNCTIONS
+// ============================================================================
+
+/**
+ * Get unique device identifier from nRF52840 hardware registers
+ * Returns a 4-character hex string derived from the chip's unique ID
+ */
+void getUniqueDeviceId(char* buffer, size_t len) {
+    // nRF52840 has two 32-bit device ID registers in FICR
+    // We combine them to create a unique identifier
+    uint32_t id0 = NRF_FICR->DEVICEID[0];
+    uint32_t id1 = NRF_FICR->DEVICEID[1];
+    
+    // XOR them together and take the lower 16 bits for a short ID
+    uint16_t shortId = (uint16_t)((id0 ^ id1) & 0xFFFF);
+    
+    snprintf(buffer, len, "%04X", shortId);
+}
+
+/**
+ * Build the unique device name: "EdgeAI-XXXX"
+ */
+void buildDeviceName() {
+    char uniqueId[8];
+    getUniqueDeviceId(uniqueId, sizeof(uniqueId));
+    snprintf(deviceName, sizeof(deviceName), "%s-%s", DEVICE_NAME_PREFIX, uniqueId);
+}
+
 // ============================================================================
 // BLE SERVICE & CHARACTERISTICS
 // ============================================================================
@@ -268,12 +300,15 @@ void setup() {
     }
     DEBUG_PRINTLN("OK");
 
-    // Set device name
-    BLE.setLocalName(DEVICE_NAME_PREFIX);
-    BLE.setDeviceName(DEVICE_NAME_PREFIX);
+    // Generate unique device name from hardware ID
+    buildDeviceName();
+    
+    // Set device name (unique per Arduino!)
+    BLE.setLocalName(deviceName);
+    BLE.setDeviceName(deviceName);
 
     DEBUG_PRINT("Device name: ");
-    DEBUG_PRINTLN(DEVICE_NAME_PREFIX);
+    DEBUG_PRINTLN(deviceName);
 
     // Configure service and characteristics
     BLE.setAdvertisedService(edgeService);

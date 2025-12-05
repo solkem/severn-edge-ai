@@ -12,9 +12,17 @@
 #endif
 
 // ============================================================================
+// BLE DEVICE NAMING
+// ============================================================================
+// Each Arduino gets a unique name based on its hardware ID
+// Format: "SevernEdgeAI-XXXX" where XXXX is derived from device ID
+// This helps students identify their specific device!
+#define DEVICE_NAME_PREFIX "SevernEdgeAI"
+#define DEVICE_NAME_MAX_LEN 20
+
+// ============================================================================
 // BLE UUIDs (Severn Edge AI Service)
 // ============================================================================
-#define DEVICE_NAME_PREFIX "Severn School Edge AI"
 #define SERVICE_UUID "19B10000-E8F2-537E-4F6C-D104768A1214"
 
 // Characteristics
