@@ -67,6 +67,7 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
 
       setAccuracy(result.accuracy);
       setIsDone(true);
+      setIsTraining(false);
       setTrainingCount(prev => prev + 1);
       setHasModel(true);
 
@@ -91,6 +92,7 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
 
       setAccuracy(result.accuracy);
       setIsDone(true);
+      setIsTraining(false);
       setTrainingCount(prev => prev + 1);
 
       console.log('Additional training complete:', result);

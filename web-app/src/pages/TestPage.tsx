@@ -35,11 +35,11 @@ export function TestPage({ labels, trainingService }: TestPageProps) {
     if (useArduinoInference) {
       // Use inference running ON the Arduino!
       await ble.startInference((result: InferenceResult) => {
-        setCurrentPrediction(result.classIndex);
+        setCurrentPrediction(result.prediction);
         setConfidence(result.confidence / 100); // Convert 0-100 to 0-1
         
         // Add to history
-        setPredictionHistory((prev) => [...prev.slice(-19), result.classIndex]);
+        setPredictionHistory((prev) => [...prev.slice(-19), result.prediction]);
       });
     } else {
       // Fallback: browser-side inference (requires model not disposed)

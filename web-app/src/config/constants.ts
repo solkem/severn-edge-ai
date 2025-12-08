@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Application Constants
  * Centralized configuration for the web application
  */
@@ -46,7 +46,7 @@ export const COLLECTION_CONFIG = {
 export const MODEL_CONFIG = {
   WINDOW_SIZE: 100,
   NUM_AXES: 6,
-  WINDOW_STRIDE: 50, // For inference sliding window
+  WINDOW_STRIDE: 25, // For inference sliding window
   EPOCHS: 50, // Default training epochs
 };
 

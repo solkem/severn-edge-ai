@@ -1,0 +1,31 @@
+{
+	"folders": [
+		{
+			"name": "Severn Edge AI",
+			"path": "."
+		},
+		{
+			"name": "Firmware (Arduino)",
+			"path": "firmware"
+		},
+		{
+			"name": "Web App (React)",
+			"path": "web-app"
+		}
+	],
+	"settings": {
+		"platformio-ide.projectDir": "firmware",
+		"files.exclude": {
+			"**/node_modules": true,
+			"**/.pio": true,
+			"**/.git": true
+		}
+	},
+	"extensions": {
+		"recommendations": [
+			"platformio.platformio-ide",
+			"dbaeumer.vscode-eslint",
+			"esbenp.prettier-vscode"
+		]
+	}
+}

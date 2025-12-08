@@ -181,13 +181,13 @@ export function CollectPage({ onComplete }: CollectPageProps) {
               <div className="flex justify-between items-center mb-2">
                 <span className="font-bold text-slate-700">Total Progress</span>
                 <span className="text-xl font-bold text-primary-600">
-                  {Math.round((getTotalSamples() / getRequiredSamples()) * 100)}%
+                  {Math.min(100, Math.round((getTotalSamples() / getRequiredSamples()) * 100))}%
                 </span>
               </div>
               <div className="bg-slate-200 rounded-full h-3 overflow-hidden">
                 <div
                   className="bg-primary-600 h-full transition-all duration-500 ease-out rounded-full"
-                  style={{ width: `${(getTotalSamples() / getRequiredSamples()) * 100}%` }}
+                  style={{ width: `${Math.min(100, (getTotalSamples() / getRequiredSamples()) * 100)}%` }}
                 />
               </div>
               <div className="mt-2 text-xs text-slate-500 text-right">

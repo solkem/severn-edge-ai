@@ -1,57 +1,43 @@
-﻿/**
+/**
  * TensorFlow.js Training Service for SimpleNN
- * 
+ *
  * ============================================================================
  * EDUCATIONAL IMPLEMENTATION
  * ============================================================================
- * 
+ *
  * This service trains a neural network in your browser!
- * 
+ *
  * The model architecture is kept simple so it can run on the Arduino:
  * - Flatten: Converts the 2D sensor data (100 time steps  6 axes) into 1D (600 numbers)
  * - Dense Hidden Layer: 32 neurons with ReLU activation
  * - Dense Output Layer: N neurons (one per gesture class) with Softmax activation
- * 
+ *
  * See firmware/docs/NEURAL_NETWORK_BASICS.md for how neural networks work!
  */
 
 import * as tf from '@tensorflow/tfjs';
 import type { Sample, GestureLabel, TrainingProgress, TrainingResult } from '../types';
-import { MODEL_CONFIG, NN_INPUT_SIZE, NN_HIDDEN_SIZE, NN_MAX_CLASSES } from '../config/constants';
+import { MODEL_CONFIG, NN_HIDDEN_SIZE, NN_MAX_CLASSES } from '../config/constants';
 
 const INPUT_SHAPE = [MODEL_CONFIG.WINDOW_SIZE, MODEL_CONFIG.NUM_AXES];
+
+// Normalization constants for sensor data
+// These values are used to scale sensor readings to a reasonable range for neural networks
+// Accelerometer: 4g range, so max value is ~4
+// Gyroscope: 2000 dps range, so max value is ~2000
+// We divide by these to get values roughly in -1 to +1 range
+const NORM_ACCEL = 4.0;    // Accelerometer normalization (divide by this)
+const NORM_GYRO = 500.0;   // Gyroscope normalization (divide by this)
 
 export class TrainingService {
   private model: tf.LayersModel | null = null;
 
   /**
    * Create the SimpleNN model architecture
-   * 
-   * ============================================================================
-   * WHY THIS ARCHITECTURE?
-   * ============================================================================
-   * 
-   * We use a simple 2-layer network because:
-   * 1. It's small enough to fit in Arduino's limited memory (~78KB for weights)
-   * 2. It's fast enough to run in real-time on the Arduino
-   * 3. It's simple enough for students to understand
-   * 4. It still works surprisingly well for gesture recognition!
-   * 
-   * The architecture:
-   * 
-   *   Input (100  6 = 600 numbers)
-   *         
-   *   [Flatten] - reshape to 1D
-   *         
-   *   [Dense 32 neurons] - hidden layer with ReLU
-   *           
-   *   [Dense N neurons] - output layer with Softmax
-   *         
-   *   Prediction (one probability per gesture)
    */
   createModel(numClasses: number): tf.LayersModel {
     console.log(`Creating SimpleNN model for ${numClasses} classes`);
-    
+
     if (numClasses > NN_MAX_CLASSES) {
       throw new Error(`Too many classes: ${numClasses}. Maximum is ${NN_MAX_CLASSES}`);
     }
@@ -59,7 +45,6 @@ export class TrainingService {
     const model = tf.sequential();
 
     // Flatten: (100, 6)  (600)
-    // This converts our 2D time-series data into a 1D vector
     model.add(
       tf.layers.flatten({
         inputShape: INPUT_SHAPE,
@@ -68,23 +53,17 @@ export class TrainingService {
     );
 
     // Hidden Layer: 600  32
-    // This is where the "learning" happens!
-    // The network learns which combinations of sensor readings
-    // are important for recognizing each gesture.
     model.add(
       tf.layers.dense({
         units: NN_HIDDEN_SIZE,
         activation: 'relu',
         name: 'hidden',
-        // Initialize with small random weights
         kernelInitializer: 'glorotNormal',
         biasInitializer: 'zeros'
       })
     );
 
     // Output Layer: 32  numClasses
-    // Each output neuron gives the probability of one gesture.
-    // Softmax ensures all probabilities add up to 1.0
     model.add(
       tf.layers.dense({
         units: numClasses,
@@ -95,25 +74,63 @@ export class TrainingService {
       })
     );
 
-    // Compile the model with optimizer and loss function
+    // Compile with Adam optimizer
     model.compile({
       optimizer: tf.train.adam(0.001),
       loss: 'categoricalCrossentropy',
       metrics: ['accuracy'],
     });
 
-    // Print model summary
     console.log('Model created:');
     model.summary();
 
+    this.model = model;
     return model;
   }
 
   /**
-   * Prepare training data from samples
+   * Normalize a single sample's sensor data
    * 
-   * This converts your recorded gesture samples into the format
-   * that TensorFlow.js needs for training.
+   * The raw values from the sensor are:
+   * - Accelerometer: in g units (roughly -4 to +4)
+   * - Gyroscope: in dps (roughly -2000 to +2000)
+   * 
+   * We normalize both to roughly -1 to +1 range so the neural network
+   * can learn effectively from all sensor channels.
+   */
+  private normalizeSample(sampleData: number[][]): number[][] {
+    return sampleData.map(row => [
+      row[0] / NORM_ACCEL,  // ax
+      row[1] / NORM_ACCEL,  // ay
+      row[2] / NORM_ACCEL,  // az
+      row[3] / NORM_GYRO,   // gx
+      row[4] / NORM_GYRO,   // gy
+      row[5] / NORM_GYRO,   // gz
+    ]);
+  }
+
+  /**
+   * Data augmentation on normalized data - creates variations to improve model robustness
+   * Works on already-normalized data (values roughly in -1 to +1 range)
+   */
+  private augmentNormalized(normalizedData: number[][]): number[][] {
+    const augmented = normalizedData.map(row => [...row]);
+    
+    // Random scaling (0.85 to 1.15x intensity)
+    const scale = 0.85 + Math.random() * 0.3;
+    
+    // Add small noise (values are normalized, so use small noise ~0.02)
+    for (let i = 0; i < augmented.length; i++) {
+      for (let j = 0; j < 6; j++) {
+        augmented[i][j] = augmented[i][j] * scale + (Math.random() - 0.5) * 0.04;
+      }
+    }
+    
+    return augmented;
+  }
+
+  /**
+   * Prepare training data from samples with augmentation
    */
   prepareData(samples: Sample[], labels: GestureLabel[]) {
     const labelMap = new Map(labels.map((l, idx) => [l.id, idx]));
@@ -122,23 +139,36 @@ export class TrainingService {
     const ys: number[] = [];
 
     for (const sample of samples) {
+      let sampleData = sample.data;
+      
       // Ensure sample has exactly MODEL_CONFIG.WINDOW_SIZE samples
-      if (sample.data.length < MODEL_CONFIG.WINDOW_SIZE) {
+      if (sampleData.length < MODEL_CONFIG.WINDOW_SIZE) {
         // Pad with zeros
-        const padded = [...sample.data];
+        const padded = [...sampleData];
         while (padded.length < MODEL_CONFIG.WINDOW_SIZE) {
           padded.push([0, 0, 0, 0, 0, 0]);
         }
-        xs.push(padded.slice(0, MODEL_CONFIG.WINDOW_SIZE));
-      } else if (sample.data.length > MODEL_CONFIG.WINDOW_SIZE) {
+        sampleData = padded.slice(0, MODEL_CONFIG.WINDOW_SIZE);
+      } else if (sampleData.length > MODEL_CONFIG.WINDOW_SIZE) {
         // Truncate
-        xs.push(sample.data.slice(0, MODEL_CONFIG.WINDOW_SIZE));
-      } else {
-        xs.push(sample.data);
+        sampleData = sampleData.slice(0, MODEL_CONFIG.WINDOW_SIZE);
       }
 
+      // Normalize the sensor data
+      const normalized = this.normalizeSample(sampleData);
+      xs.push(normalized);
       ys.push(labelMap.get(sample.label)!);
+      
+      // Add 2 augmented versions of each sample for better generalization
+      for (let aug = 0; aug < 2; aug++) {
+        // Augment the normalized data (not raw data)
+        const augmented = this.augmentNormalized(normalized);
+        xs.push(augmented);
+        ys.push(labelMap.get(sample.label)!);
+      }
     }
+
+    console.log(`Prepared ${xs.length} samples (${samples.length} original + ${samples.length * 2} augmented)`);
 
     // Convert to tensors
     const xTensor = tf.tensor3d(xs);
@@ -149,20 +179,6 @@ export class TrainingService {
 
   /**
    * Train the model
-   * 
-   * ============================================================================
-   * HOW TRAINING WORKS
-   * ============================================================================
-   * 
-   * Training is an iterative process:
-   * 1. Show the network your gesture samples
-   * 2. The network makes predictions (initially random!)
-   * 3. Compare predictions to the correct answers
-   * 4. Calculate how wrong the network was (the "loss")
-   * 5. Adjust the weights slightly to reduce the loss
-   * 6. Repeat many times (epochs)
-   * 
-   * After enough repetitions, the network learns patterns in your data!
    */
   async train(
     samples: Sample[],
@@ -171,22 +187,28 @@ export class TrainingService {
   ): Promise<TrainingResult> {
     console.log(`Training SimpleNN with ${samples.length} samples, ${labels.length} classes`);
 
-    // Create model
-    this.model = this.createModel(labels.length);
+    // Create or reuse model (for progressive training)
+    if (!this.model || this.model.outputShape[1] !== labels.length) {
+      this.model = this.createModel(labels.length);
+    }
 
-    // Prepare data
+    // Prepare data with normalization
     const { xTensor, yTensor } = this.prepareData(samples, labels);
+
+    // Log data statistics for debugging
+    const dataStats = xTensor.mean().dataSync()[0];
+    console.log(`Data mean: ${dataStats.toFixed(4)}`);
 
     // Training configuration
     const epochs = MODEL_CONFIG.EPOCHS;
-    const batchSize = 8;
+    const batchSize = Math.min(16, Math.floor(samples.length / 2)); // Adaptive batch size
     const validationSplit = 0.2;
 
     try {
       // Train model
       const history = await this.model.fit(xTensor, yTensor, {
         epochs,
-        batchSize,
+        batchSize: Math.max(1, batchSize),
         validationSplit,
         shuffle: true,
         callbacks: {
@@ -227,14 +249,6 @@ export class TrainingService {
 
   /**
    * Estimate model size in KB
-   * 
-   * For SimpleNN with 32 hidden neurons and N classes:
-   * - Hidden weights: 600  32 = 19,200 floats = 76.8 KB
-   * - Hidden biases: 32 floats = 128 bytes
-   * - Output weights: 32  N floats
-   * - Output biases: N floats
-   * 
-   * Total: ~77-78 KB depending on number of classes
    */
   private estimateModelSize(): number {
     if (!this.model) return 0;
@@ -277,8 +291,11 @@ export class TrainingService {
       input = input.slice(0, MODEL_CONFIG.WINDOW_SIZE);
     }
 
+    // Normalize the input (same as training!)
+    const normalized = this.normalizeSample(input);
+
     // Run prediction
-    const inputTensor = tf.tensor3d([input]);
+    const inputTensor = tf.tensor3d([normalized]);
     const output = this.model.predict(inputTensor) as tf.Tensor;
     const probabilities = output.dataSync();
 
@@ -300,5 +317,8 @@ export class TrainingService {
   }
 }
 
-// Singleton instance
-export const trainingService = new TrainingService();
+// Export normalization constants for use in firmware
+export const NORMALIZATION = {
+  ACCEL: NORM_ACCEL,
+  GYRO: NORM_GYRO,
+};

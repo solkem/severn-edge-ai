@@ -28,6 +28,10 @@ export class BLEService {
   private inferenceCallback: InferenceCallback | null = null;
   private disconnectCallback: DisconnectCallback | null = null;
 
+  // Event handlers (stored so we can remove them)
+  private sensorHandler: ((event: Event) => void) | null = null;
+  private inferenceHandler: ((event: Event) => void) | null = null;
+
   // ============================================================================
   // Connection Management
   // ============================================================================
@@ -148,23 +152,35 @@ export class BLEService {
     // Store callback
     this.sensorCallback = callback;
 
-    // Start notifications
-    await this.sensorChar.startNotifications();
+    // Remove old handler if exists
+    if (this.sensorHandler && this.sensorChar) {
+      this.sensorChar.removeEventListener('characteristicvaluechanged', this.sensorHandler);
+    }
 
-    this.sensorChar.addEventListener('characteristicvaluechanged', (event: Event) => {
+    // Create and store new handler
+    this.sensorHandler = (event: Event) => {
       const target = event.target as BluetoothRemoteGATTCharacteristic;
       const packet = parseSensorPacket(target.value!);
 
       if (packet && this.sensorCallback) {
         this.sensorCallback(packet);
       }
-    });
+    };
+
+    // Start notifications and add listener
+    await this.sensorChar.startNotifications();
+    this.sensorChar.addEventListener('characteristicvaluechanged', this.sensorHandler);
 
     console.log('Sensor streaming started');
   }
 
   async stopSensorStream(): Promise<void> {
     if (this.sensorChar) {
+      // Remove event listener first
+      if (this.sensorHandler) {
+        this.sensorChar.removeEventListener('characteristicvaluechanged', this.sensorHandler);
+        this.sensorHandler = null;
+      }
       await this.sensorChar.stopNotifications();
       this.sensorCallback = null;
       console.log('Sensor streaming stopped');
@@ -186,23 +202,37 @@ export class BLEService {
     // Store callback
     this.inferenceCallback = callback;
 
-    // Start notifications
-    await this.inferenceChar.startNotifications();
+    // Remove old handler if exists
+    if (this.inferenceHandler && this.inferenceChar) {
+      this.inferenceChar.removeEventListener('characteristicvaluechanged', this.inferenceHandler);
+    }
 
-    this.inferenceChar.addEventListener('characteristicvaluechanged', (event: Event) => {
+    // Create and store new handler
+    this.inferenceHandler = (event: Event) => {
       const target = event.target as BluetoothRemoteGATTCharacteristic;
       const result = parseInferenceResult(target.value!);
+
+      console.log(`Inference result: class=${result.prediction}, confidence=${result.confidence}%`);
 
       if (this.inferenceCallback) {
         this.inferenceCallback(result);
       }
-    });
+    };
+
+    // Start notifications and add listener
+    await this.inferenceChar.startNotifications();
+    this.inferenceChar.addEventListener('characteristicvaluechanged', this.inferenceHandler);
 
     console.log('Inference mode started');
   }
 
   async stopInference(): Promise<void> {
     if (this.inferenceChar) {
+      // Remove event listener first
+      if (this.inferenceHandler) {
+        this.inferenceChar.removeEventListener('characteristicvaluechanged', this.inferenceHandler);
+        this.inferenceHandler = null;
+      }
       await this.inferenceChar.stopNotifications();
       this.inferenceCallback = null;
       console.log('Inference mode stopped');

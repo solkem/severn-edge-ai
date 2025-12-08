@@ -73,7 +73,7 @@
 // INFERENCE CONFIGURATION
 // ============================================================================
 #define WINDOW_SIZE 100       // Number of samples in sliding window
-#define WINDOW_STRIDE 50      // Samples to slide after inference
+#define WINDOW_STRIDE 25      // Samples to slide after inference (1 sec @ 25Hz = faster response!)
 #define NUM_CLASSES 3         // Default number of gesture classes
 
 // ============================================================================

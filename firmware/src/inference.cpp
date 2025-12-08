@@ -29,6 +29,13 @@
 static float sampleBuffer[WINDOW_SIZE][6];  // 100 samples × 6 axes (normalized)
 static int sampleIndex = 0;
 
+// Normalization constants - MUST MATCH web app's trainingService.ts!
+// Web app divides accelerometer by 4.0 and gyroscope by 500.0
+// We receive values already scaled by ACCEL_SCALE (8192) and GYRO_SCALE (16.4)
+// So we need additional normalization to match training
+static const float NORM_ACCEL = 4.0f;   // Same as web app
+static const float NORM_GYRO = 500.0f;  // Same as web app
+
 // ============================================================================
 // SimpleNN Instance
 // ============================================================================
@@ -97,14 +104,20 @@ bool isModelLoaded() {
 
 void addSample(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz) {
     if (sampleIndex < WINDOW_SIZE) {
-        // Normalize values to approximately -1 to +1 range
-        // This matches what the web app does during training
-        sampleBuffer[sampleIndex][0] = (float)ax / ACCEL_SCALE;
-        sampleBuffer[sampleIndex][1] = (float)ay / ACCEL_SCALE;
-        sampleBuffer[sampleIndex][2] = (float)az / ACCEL_SCALE;
-        sampleBuffer[sampleIndex][3] = (float)gx / GYRO_SCALE / 100.0f;
-        sampleBuffer[sampleIndex][4] = (float)gy / GYRO_SCALE / 100.0f;
-        sampleBuffer[sampleIndex][5] = (float)gz / GYRO_SCALE / 100.0f;
+        // Step 1: Convert from raw int16 to physical units (same as web app's bleParser.ts)
+        //   Accel: raw / 8192 = g units
+        //   Gyro: raw / 16.4 = dps units
+        // Step 2: Normalize to match training (same as web app's trainingService.ts)
+        //   Accel: g / 4.0 → roughly -1 to +1
+        //   Gyro: dps / 500.0 → roughly -1 to +1
+        
+        // Combined: raw / (SCALE * NORM)
+        sampleBuffer[sampleIndex][0] = (float)ax / (ACCEL_SCALE * NORM_ACCEL);
+        sampleBuffer[sampleIndex][1] = (float)ay / (ACCEL_SCALE * NORM_ACCEL);
+        sampleBuffer[sampleIndex][2] = (float)az / (ACCEL_SCALE * NORM_ACCEL);
+        sampleBuffer[sampleIndex][3] = (float)gx / (GYRO_SCALE * NORM_GYRO);
+        sampleBuffer[sampleIndex][4] = (float)gy / (GYRO_SCALE * NORM_GYRO);
+        sampleBuffer[sampleIndex][5] = (float)gz / (GYRO_SCALE * NORM_GYRO);
         sampleIndex++;
     }
 }
