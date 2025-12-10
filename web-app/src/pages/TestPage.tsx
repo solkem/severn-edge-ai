@@ -12,9 +12,10 @@ import { getBLEService } from '../services/bleService';
 interface TestPageProps {
   labels: GestureLabel[];
   trainingService: TrainingService;
+  onStartOver?: () => void;
 }
 
-export function TestPage({ labels, trainingService }: TestPageProps) {
+export function TestPage({ labels, trainingService, onStartOver }: TestPageProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [currentPrediction, setCurrentPrediction] = useState<number | null>(null);
   const [confidence, setConfidence] = useState<number>(0);
@@ -258,6 +259,17 @@ export function TestPage({ labels, trainingService }: TestPageProps) {
                 )}
               </ul>
             </div>
+          )}
+
+          {/* Start Over Button */}
+          {onStartOver && !isRunning && (
+            <button
+              onClick={onStartOver}
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-6 rounded-xl transition-colors border border-slate-200 flex items-center justify-center gap-2"
+            >
+              <span>🏠</span>
+              <span>Start Over</span>
+            </button>
           )}
         </div>
       </div>

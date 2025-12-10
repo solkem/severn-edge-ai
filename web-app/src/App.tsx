@@ -36,6 +36,15 @@ function App() {
     setStage(AppStage.TEST);
   };
 
+  const handleStartOver = () => {
+    // Reset all state and go back to connect page
+    setStage(AppStage.CONNECT);
+    setDeviceInfo(null);
+    setSamples([]);
+    setLabels([]);
+    setTrainingService(null);
+  };
+
   return (
     <div className="app min-h-screen flex flex-col">
       {/* Progress Indicator */}
@@ -106,7 +115,7 @@ function App() {
         )}
 
         {stage === AppStage.TEST && trainingService && (
-          <TestPage labels={labels} trainingService={trainingService} />
+          <TestPage labels={labels} trainingService={trainingService} onStartOver={handleStartOver} />
         )}
       </div>
 
