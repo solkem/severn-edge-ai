@@ -1,5 +1,5 @@
 /**
- * Severn Edge AI v3.2 - Arduino Firmware
+ * Severn Edge AI - Arduino Firmware
  *
  * Complete BLE machine learning system for gesture recognition
  * Supports Arduino Nano 33 BLE Sense Rev1 (LSM9DS1) and Rev2 (BMI270)
@@ -186,13 +186,24 @@ void handleModelUpload() {
             
             beginModelUpload(uploadExpectedSize, uploadNumClasses);
             
-            // Parse class labels from remaining bytes
+            // Parse class labels from remaining bytes (bounds-checked)
             int offset = 10;
             for (int i = 0; i < uploadNumClasses && offset < len; i++) {
-                // Labels are null-terminated strings
-                const char* label = (const char*)&data[offset];
-                setModelLabel(i, label);
-                offset += strlen(label) + 1;
+                // Find null terminator within remaining buffer
+                int remaining = len - offset;
+                const void* term = memchr(&data[offset], '\0', remaining);
+                if (!term) {
+                    // Label not null-terminated — reject to prevent OOB read
+                    DEBUG_PRINTLN("Label not null-terminated, rejecting");
+                    updateModelStatus(UPLOAD_ERROR, 0, STATUS_ERROR_FORMAT);
+                    return;
+                }
+                int labelLen = (const uint8_t*)term - &data[offset];
+                char safeLabel[16] = {0};
+                int copyLen = labelLen < 15 ? labelLen : 15;
+                memcpy(safeLabel, &data[offset], copyLen);
+                setModelLabel(i, safeLabel);
+                offset += labelLen + 1;
             }
             
             updateModelStatus(UPLOAD_RECEIVING, 0, STATUS_RECEIVING);
@@ -265,7 +276,7 @@ void setup() {
     delay(1000);  // Wait for serial connection
 
     DEBUG_PRINTLN("=================================");
-    DEBUG_PRINTLN("Severn Edge AI v3.1");
+    DEBUG_PRINTLN("Severn Edge AI v1.1");
     DEBUG_PRINTLN("=================================");
 
     // Initialize sensor

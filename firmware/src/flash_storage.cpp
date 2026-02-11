@@ -177,9 +177,19 @@ bool receiveModelChunk(const uint8_t* data, uint16_t length, uint32_t offset) {
         return false;
     }
     
+    // Enforce strictly sequential chunks to prevent gaps in the model data
+    if (offset != bytesReceived) {
+        DEBUG_PRINT("Out-of-order chunk: expected offset ");
+        DEBUG_PRINT(bytesReceived);
+        DEBUG_PRINT(" got ");
+        DEBUG_PRINTLN(offset);
+        currentUploadState = UPLOAD_ERROR;
+        return false;
+    }
+
     // Copy chunk to buffer
     memcpy(&uploadBuffer[offset], data, length);
-    bytesReceived = offset + length;
+    bytesReceived += length;
     
     DEBUG_PRINT("Received chunk: offset=");
     DEBUG_PRINT(offset);
@@ -219,20 +229,16 @@ UploadStatus finalizeModelUpload(uint32_t expectedCrc32) {
         return STATUS_ERROR_SIZE;
     }
     
-    // CRC Verification
-    // Note: BLE already provides error detection/correction at the link layer (CRC-24 + retransmit)
-    // This application-level CRC is informational - we log mismatches but don't fail
-    // because BLE's own mechanisms ensure data integrity.
+    // CRC Verification — reject corrupted model data
     uint32_t actualCrc = calculateCrc32(uploadBuffer, bytesReceived);
-    
+
     if (actualCrc != expectedCrc32) {
-        // Mismatch between JS-calculated and C++-calculated CRC
-        // This appears to be a calculation difference, not a transmission error
-        // (verified: BLE transmission is reliable, model loads correctly)
         char crcBuf[80];
-        sprintf(crcBuf, "CRC info: expected 0x%08lX, actual 0x%08lX", 
+        sprintf(crcBuf, "CRC mismatch: expected 0x%08lX, actual 0x%08lX",
                 (unsigned long)expectedCrc32, (unsigned long)actualCrc);
         DEBUG_PRINTLN(crcBuf);
+        currentUploadState = UPLOAD_ERROR;
+        return STATUS_ERROR_CRC;
     }
     
     DEBUG_PRINTLN("Building model structure...");
