@@ -213,31 +213,40 @@ export class TrainingService {
         shuffle: true,
         callbacks: {
           onEpochEnd: (epoch, logs) => {
+            // TF.js uses 'acc'/'val_acc'; handle both for future-proofing
+            const acc = (logs?.acc ?? logs?.accuracy ?? 0) as number;
+            const valAcc = (logs?.val_acc ?? logs?.val_accuracy) as number | undefined;
             onProgress({
               epoch: epoch + 1,
               totalEpochs: epochs,
               loss: logs?.loss || 0,
-              accuracy: logs?.acc || 0,
+              accuracy: acc,
               valLoss: logs?.val_loss,
-              valAccuracy: logs?.val_acc,
+              valAccuracy: valAcc,
             });
           },
         },
       });
 
-      // Get final metrics
-      const finalEpoch = history.history.acc.length - 1;
-      const accuracy = history.history.val_acc?.[finalEpoch] || history.history.acc[finalEpoch];
-      const loss = history.history.val_loss?.[finalEpoch] || history.history.loss[finalEpoch];
+      // Get final metrics — handle both 'acc' and 'accuracy' history keys
+      const hist = history.history;
+      const accHist = (hist.acc ?? hist.accuracy ?? []) as number[];
+      const valAccHist = (hist.val_acc ?? hist.val_accuracy ?? []) as number[];
+      const valLossHist = (hist.val_loss ?? []) as number[];
+      const lossHist = (hist.loss ?? []) as number[];
+
+      const finalEpoch = accHist.length - 1;
+      const accuracy = valAccHist[finalEpoch] ?? accHist[finalEpoch] ?? 0;
+      const loss = valLossHist[finalEpoch] ?? lossHist[finalEpoch] ?? 0;
 
       // Calculate model size
       const modelSizeKB = this.estimateModelSize();
 
-      console.log(`Training complete! Accuracy: ${(accuracy as number * 100).toFixed(1)}%`);
+      console.log(`Training complete! Accuracy: ${((accuracy as number) * 100).toFixed(1)}%`);
 
       return {
-        accuracy: typeof accuracy === 'number' ? accuracy : (accuracy as any)[0],
-        loss: typeof loss === 'number' ? loss : (loss as any)[0],
+        accuracy: accuracy as number,
+        loss: loss as number,
         modelSizeKB,
       };
     } finally {
