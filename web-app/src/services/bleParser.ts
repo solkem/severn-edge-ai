@@ -34,7 +34,8 @@ export function parseSensorPacket(data: DataView): SensorPacket | null {
   }
 
   // Validate CRC before parsing
-  const bytes = new Uint8Array(data.buffer);
+  // Use byteOffset/byteLength to correctly handle DataViews backed by larger ArrayBuffers
+  const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   if (!validatePacketCRC(bytes)) {
     console.warn('CRC validation failed for sensor packet');
     return null;
@@ -61,6 +62,10 @@ export function parseSensorPacket(data: DataView): SensorPacket | null {
 // ============================================================================
 
 export function parseDeviceInfo(data: DataView): DeviceInfo {
+  if (data.byteLength < 20) {
+    throw new Error(`Invalid device info size: ${data.byteLength} (expected >= 20)`);
+  }
+
   return {
     firmwareMajor: data.getUint8(0),
     firmwareMinor: data.getUint8(1),
@@ -79,6 +84,10 @@ export function parseDeviceInfo(data: DataView): DeviceInfo {
 // ============================================================================
 
 export function parseInferenceResult(data: DataView): InferenceResult {
+  if (data.byteLength < 2) {
+    throw new Error(`Invalid inference result size: ${data.byteLength} (expected >= 2)`);
+  }
+
   return {
     prediction: data.getUint8(0),
     confidence: data.getUint8(1),  // Already in 0-100 range
