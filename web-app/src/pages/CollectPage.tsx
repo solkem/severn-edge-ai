@@ -2,7 +2,7 @@
  * Collect Page - Record Labeled Gesture Samples
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { getBLEService } from '../services/bleService';
 import { SensorPacket } from '../types/ble';
 import { KidFeedback, FeedbackStatus } from '../components/KidFeedback';
@@ -32,6 +32,7 @@ export function CollectPage({ onComplete }: CollectPageProps) {
   const recordingStartTime = useRef<number>(0);
   const expectedSequence = useRef<number>(0);
   const packetLossCount = useRef<number>(0);
+  const isFinishing = useRef(false);
 
   // Start recording for a specific label
   const startRecording = async (labelId: string) => {
@@ -43,45 +44,53 @@ export function CollectPage({ onComplete }: CollectPageProps) {
     recordingStartTime.current = Date.now();
     expectedSequence.current = -1; // Will be set on first packet
     packetLossCount.current = 0;
+    isFinishing.current = false;
 
     const ble = getBLEService();
 
-    // Start sensor stream
-    await ble.startSensorStream((packet: SensorPacket) => {
-      // Track packet loss
-      if (expectedSequence.current !== -1) {
-        const expectedSeq = expectedSequence.current;
-        const receivedSeq = packet.sequence;
+    try {
+      // Start sensor stream
+      await ble.startSensorStream((packet: SensorPacket) => {
+        // Track packet loss
+        if (expectedSequence.current !== -1) {
+          const expectedSeq = expectedSequence.current;
+          const receivedSeq = packet.sequence;
 
-        // Handle sequence wrapping
-        if (receivedSeq !== expectedSeq) {
-          let lost = (receivedSeq - expectedSeq + 65536) % 65536;
-          if (lost > 100) lost = 0; // Ignore large jumps (reconnections)
-          packetLossCount.current += lost;
+          // Handle sequence wrapping
+          if (receivedSeq !== expectedSeq) {
+            let lost = (receivedSeq - expectedSeq + 65536) % 65536;
+            if (lost > 100) lost = 0; // Ignore large jumps (reconnections)
+            packetLossCount.current += lost;
+          }
         }
-      }
-      expectedSequence.current = (packet.sequence + 1) % 65536;
+        expectedSequence.current = (packet.sequence + 1) % 65536;
 
-      // Store sample data
-      currentSampleData.current.push([
-        packet.ax,
-        packet.ay,
-        packet.az,
-        packet.gx,
-        packet.gy,
-        packet.gz,
-      ]);
+        // Store sample data
+        currentSampleData.current.push([
+          packet.ax,
+          packet.ay,
+          packet.az,
+          packet.gx,
+          packet.gy,
+          packet.gz,
+        ]);
 
-      // Update progress
-      const elapsed = Date.now() - recordingStartTime.current;
-      const progress = Math.min(100, (elapsed / COLLECTION_CONFIG.SAMPLE_DURATION_MS) * 100);
-      setRecordingProgress(progress);
+        // Update progress
+        const elapsed = Date.now() - recordingStartTime.current;
+        const progress = Math.min(100, (elapsed / COLLECTION_CONFIG.SAMPLE_DURATION_MS) * 100);
+        setRecordingProgress(progress);
 
-      // Stop when duration reached
-      if (elapsed >= COLLECTION_CONFIG.SAMPLE_DURATION_MS) {
-        finishRecording(labelId);
-      }
-    });
+        // Stop when duration reached (guard against multiple calls)
+        if (elapsed >= COLLECTION_CONFIG.SAMPLE_DURATION_MS && !isFinishing.current) {
+          isFinishing.current = true;
+          finishRecording(labelId);
+        }
+      });
+    } catch (err) {
+      console.error('Recording failed:', err);
+      setIsRecording(false);
+      setCurrentLabel(null);
+    }
   };
 
   const finishRecording = async (labelId: string) => {
