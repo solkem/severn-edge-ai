@@ -57,14 +57,14 @@ export function ConnectPage({ onConnected }: ConnectPageProps) {
           <div className="mb-8 relative inline-block">
             <div className="absolute inset-0 bg-primary-100 rounded-full blur-xl opacity-50"></div>
             <img
-              src="/severn-logo.png"
+              src={`${import.meta.env.BASE_URL}severn-logo.png`}
               alt="Severn School"
               className="w-24 h-24 relative z-10 mx-auto transform hover:scale-110 transition-transform duration-300"
             />
           </div>
           
-          <h1 className="heading-lg mb-4 bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-secondary-600">
-            Severn Edge AI
+          <h1 className="heading-lg mb-4 pb-1 bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-secondary-600">
+            Severn School Edge AI
           </h1>
           <p className="text-xl text-slate-600 mb-10 font-medium">
             Let's teach your Arduino to recognize gestures!
