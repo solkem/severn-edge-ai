@@ -56,13 +56,19 @@ public:
 protected:
     uint16_t _sequence = 0;  // Packet sequence counter
 
-    // Helper functions for scaling raw sensor values
+    // Helper functions for scaling raw sensor values (with clamping to avoid int16 overflow)
     int16_t scaleAccel(float g) {
-        return (int16_t)(g * ACCEL_SCALE);
+        float scaled = g * ACCEL_SCALE;
+        if (scaled > 32767.0f) return 32767;
+        if (scaled < -32768.0f) return -32768;
+        return (int16_t)scaled;
     }
 
     int16_t scaleGyro(float dps) {
-        return (int16_t)(dps * GYRO_SCALE);
+        float scaled = dps * GYRO_SCALE;
+        if (scaled > 32767.0f) return 32767;
+        if (scaled < -32768.0f) return -32768;
+        return (int16_t)scaled;
     }
 };
 
