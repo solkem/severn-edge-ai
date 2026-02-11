@@ -3,7 +3,7 @@
  * Uses Arduino-side inference (model runs on device!)
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { GestureLabel } from '../types';
 import { TrainingService } from '../services/trainingService';
 import { InferenceResult } from '../types/ble';
@@ -24,8 +24,9 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
 
   useEffect(() => {
     return () => {
-      // Cleanup on unmount
-      stopTesting();
+      // Cleanup on unmount: stop both stream types to avoid stale closure issues
+      const ble = getBLEService();
+      void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
     };
   }, []);
 
@@ -77,7 +78,7 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
     setIsRunning(false);
   };
 
-  const getPredictionCounts = () => {
+  const predictionCounts = useMemo(() => {
     const counts = new Array(labels.length).fill(0);
     for (const pred of predictionHistory) {
       if (pred >= 0 && pred < counts.length) {
@@ -85,7 +86,7 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
       }
     }
     return counts;
-  };
+  }, [predictionHistory, labels.length]);
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
@@ -198,8 +199,7 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
             {predictionHistory.length > 0 ? (
               <div className="space-y-4">
                 {labels.map((label, idx) => {
-                  const counts = getPredictionCounts();
-                  const count = counts[idx];
+                  const count = predictionCounts[idx];
                   const total = predictionHistory.length;
                   const percentage = total > 0 ? (count / total) * 100 : 0;
 
