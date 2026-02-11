@@ -12,7 +12,7 @@ import { useState, useEffect } from 'react';
 import { Sample, GestureLabel, TrainingProgress } from '../types';
 import { TrainingService } from '../services/trainingService';
 import { KidFeedback } from '../components/KidFeedback';
-import { exportForArduino, modelToTFLiteBytes } from '../services/modelExportService';
+import { exportForArduino, modelToSimpleNNBytes } from '../services/modelExportService';
 import { bleModelUploadService, UploadProgress } from '../services/bleModelUploadService';
 import { getBLEService } from '../services/bleService';
 
@@ -125,7 +125,7 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
     setUploadProgress(null);
 
     try {
-      const modelBytes = modelToTFLiteBytes(model, labels);
+      const modelBytes = modelToSimpleNNBytes(model);
       const bleService = getBLEService();
       const server = bleService.getServer();
 

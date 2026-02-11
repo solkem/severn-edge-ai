@@ -150,12 +150,10 @@ export function extractSimpleNNWeights(model: tf.LayersModel): SimpleNNWeights {
   console.log(`  Hidden: ${hiddenSize} neurons x ${inputSize} inputs`);
   console.log(`  Output: ${numClasses} classes x ${hiddenSize} hidden`);
   
-  // Clean up tensors
-  hiddenWeightsTensor.dispose();
-  hiddenBiasesTensor.dispose();
-  outputWeightsTensor.dispose();
-  outputBiasesTensor.dispose();
-  
+  // NOTE: Do NOT dispose these tensors — they are owned by the model's layers.
+  // Disposing them would destroy the model's weights, breaking progressive
+  // training ("Train More") and browser-side inference.
+
   return {
     inputSize,
     hiddenSize,
@@ -226,22 +224,22 @@ export function modelToSimpleNNBytes(model: tf.LayersModel): Uint8Array {
  * The Arduino calculates the same CRC and compares it to make sure
  * all the weight data arrived correctly.
  */
-export function calculateCrc32(data: Uint8Array): number {
-  // CRC32 lookup table (pre-computed for speed)
-  const table = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let j = 0; j < 8; j++) {
-      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
-    }
-    table[i] = c;
+// CRC32 lookup table (pre-computed once at module load for speed)
+const CRC32_TABLE = new Uint32Array(256);
+for (let i = 0; i < 256; i++) {
+  let c = i;
+  for (let j = 0; j < 8; j++) {
+    c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
   }
-  
+  CRC32_TABLE[i] = c;
+}
+
+export function calculateCrc32(data: Uint8Array): number {
   let crc = 0xFFFFFFFF;
   for (let i = 0; i < data.length; i++) {
-    crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+    crc = CRC32_TABLE[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
   }
-  
+
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
@@ -308,7 +306,7 @@ ${hexArray}
 }
 
 // ============================================================================
-// LEGACY EXPORTS (for compatibility with existing UI)
+// EXPORTS
 // ============================================================================
 
 import type { GestureLabel } from '../types';
@@ -347,14 +345,4 @@ export async function exportForArduino(
   console.log('Model exported as gesture_model.h');
 }
 
-/**
- * Legacy alias for modelToSimpleNNBytes (for backward compatibility)
- */
-export function modelToTFLiteBytes(
-  model: tf.LayersModel,
-  _labels?: GestureLabel[]
-): Uint8Array {
-  console.log('Note: Using SimpleNN format (not TFLite)');
-  return modelToSimpleNNBytes(model);
-}
 
