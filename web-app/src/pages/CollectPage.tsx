@@ -64,6 +64,58 @@ function GesturePill({ label, canRemove, onRemove, onRename, maxLength }: {
   );
 }
 
+/** Collapsible live sensor display — "See what the AI sees" */
+function SensorPeek({ packet }: { packet: number[] | null }) {
+  const [open, setOpen] = useState(false);
+
+  const axes = [
+    { label: 'ax', value: packet?.[0] ?? 0, max: 4, color: 'bg-red-400' },
+    { label: 'ay', value: packet?.[1] ?? 0, max: 4, color: 'bg-red-400' },
+    { label: 'az', value: packet?.[2] ?? 0, max: 4, color: 'bg-red-400' },
+    { label: 'gx', value: packet?.[3] ?? 0, max: 500, color: 'bg-blue-400' },
+    { label: 'gy', value: packet?.[4] ?? 0, max: 500, color: 'bg-blue-400' },
+    { label: 'gz', value: packet?.[5] ?? 0, max: 500, color: 'bg-blue-400' },
+  ];
+
+  return (
+    <div className="mt-4">
+      <button
+        onClick={() => setOpen(!open)}
+        className="text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1"
+      >
+        <span>{open ? '\u25BC' : '\u25B6'}</span>
+        {open ? 'Hide the numbers' : 'See what the AI sees'}
+      </button>
+      {open && (
+        <div className="mt-3 bg-slate-900 rounded-xl p-4 font-mono text-sm">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+            {axes.map((a) => {
+              const pct = Math.min(100, (Math.abs(a.value) / a.max) * 100);
+              return (
+                <div key={a.label} className="flex items-center gap-2">
+                  <span className="text-slate-400 w-6 text-right">{a.label}</span>
+                  <span className={`w-16 text-right ${Math.abs(a.value) > a.max * 0.7 ? 'text-amber-300' : 'text-emerald-300'}`}>
+                    {a.value.toFixed(2)}
+                  </span>
+                  <div className="flex-1 bg-slate-700 rounded-full h-2 overflow-hidden">
+                    <div
+                      className={`${a.color} h-full transition-all duration-75`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {!packet && (
+            <p className="text-slate-500 text-xs text-center mt-2">Start recording to see live data</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface CollectPageProps {
   onComplete: (samples: Sample[], labels: GestureLabel[]) => void;
 }
@@ -86,6 +138,9 @@ export function CollectPage({ onComplete }: CollectPageProps) {
   // Gesture setup phase
   const [isSetupComplete, setIsSetupComplete] = useState(false);
   const [newGestureName, setNewGestureName] = useState('');
+
+  // Live sensor display
+  const [livePacket, setLivePacket] = useState<number[] | null>(null);
 
   const currentSampleData = useRef<number[][]>([]);
   const recordingStartTime = useRef<number>(0);
@@ -125,14 +180,13 @@ export function CollectPage({ onComplete }: CollectPageProps) {
         expectedSequence.current = (packet.sequence + 1) % 65536;
 
         // Store sample data
-        currentSampleData.current.push([
-          packet.ax,
-          packet.ay,
-          packet.az,
-          packet.gx,
-          packet.gy,
-          packet.gz,
-        ]);
+        const values = [packet.ax, packet.ay, packet.az, packet.gx, packet.gy, packet.gz];
+        currentSampleData.current.push(values);
+
+        // Update live display (~6 fps, every 4th packet)
+        if (currentSampleData.current.length % 4 === 0) {
+          setLivePacket(values);
+        }
 
         // Update progress
         const elapsed = Date.now() - recordingStartTime.current;
@@ -191,6 +245,7 @@ export function CollectPage({ onComplete }: CollectPageProps) {
 
     setIsRecording(false);
     setCurrentLabel(null);
+    setLivePacket(null);
   };
 
   const calculateQuality = (data: number[][], packetLossRate: number): number => {
@@ -388,11 +443,13 @@ export function CollectPage({ onComplete }: CollectPageProps) {
                     />
                   </div>
                   <p className="text-center text-sm text-slate-500 mt-2">Recording...</p>
+                  <SensorPeek packet={livePacket} />
                 </div>
               ) : (
                 <div className="text-center py-8 text-slate-400">
                   <div className="text-6xl mb-4 opacity-50">👆</div>
                   <p className="text-lg">Select a gesture below to start recording</p>
+                  <SensorPeek packet={null} />
                 </div>
               )}
             </div>
