@@ -11,7 +11,7 @@
 - [ ] Arduino Nano 33 BLE Sense (one per student)
 - [ ] USB cables
 - [ ] Laptops with Chrome browser
-- [ ] Web app running (`npm run dev` or deployed URL)
+- [ ] Web app running at https://solkem.github.io/severn-edge-ai/ (or `npm run dev` locally)
 - [ ] Firmware flashed to all boards
 
 ---

@@ -94,6 +94,10 @@ pio device monitor   # View serial output (115200 baud)
 
 ### Web App
 
+**Live:** https://solkem.github.io/severn-edge-ai/
+
+Or run locally:
+
 ```bash
 cd web-app
 npm install
