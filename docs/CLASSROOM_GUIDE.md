@@ -47,27 +47,53 @@ Keep it fast. The goal is excitement, not explanation.
 
 **Troubleshooting:** If a board doesn't appear, check USB is plugged in and try refreshing the page.
 
-### Explore the Sensor (15 min)
+### Explore the Sensor (5 min)
 
 Once connected, have students open the **"See what the AI sees"** panel (click the collapsible header on the Collect page). This shows a live terminal-style display with 6 values and color-coded bars:
 
-- **Red bars** — accelerometer (ax, ay, az) — measures tilt and acceleration
-- **Blue bars** — gyroscope (gx, gy, gz) — measures rotation speed
+- **Red bars** — accelerometer (ax, ay, az) — measures all forces on the board. When it's still, that force is gravity — which tells us which way is down. Shake it, and the readings change even if the tilt doesn't.
+- **Blue bars** — gyroscope (gx, gy, gz) — measures how fast the board is rotating
 
 Have students move the Arduino and watch the numbers react:
 
 - "Wave it — what numbers change?"
 - "Hold it perfectly still — what do you see?"
 - "Flip it upside down — which number moved?"
-- "Spin it — which bars go crazy?" (gyroscope!)
+- "Rotate it forward like a seesaw — which blue bar spikes?" (gyroscope!)
 
-This builds intuition that the 6 numbers are all the AI has to work with. There's no camera, no microphone — just motion numbers.
+We sample these values about 25 times per second — the same rate the AI model was trained on. This builds intuition that the 6 numbers are all the AI has to work with. There's no camera, no microphone — just motion numbers.
+
+Real devices combine accelerometer and gyroscope together so your phone, drone, or VR headset always knows its orientation.
+
+### Sensor Challenges (10 min)
+
+Now that students can see the numbers, give them challenges that build intuition about *which* numbers matter:
+
+**Challenge 1 — "Same or Different?"**
+> Do a slow wave, then a fast wave. Watch the panel. Can you see the difference?
+
+Kids notice: fast wave produces bigger gyro spikes. The AI *can* tell these apart, but the difference is subtle. This sets up the "make gestures distinct" rule naturally.
+
+**Challenge 2 — "Find the Axis"**
+> Try to make ONLY the gz bar move. Nothing else.
+
+They'll discover spinning the board like a top isolates gz. This teaches that each axis responds to a specific type of motion — the AI has 6 independent signals, not just one blob of "movement."
+
+**Challenge 3 — "Trick Question"**
+> Do a big circle. Now stir a pot. Watch the numbers. Are they the same to the sensor?
+
+Usually yes — two gestures that *look* different to a human can look *identical* to the sensor. This is the deepest lesson: **the AI doesn't see what you see. It sees what the sensor reports.**
+
+**Challenge 4 — "Design Your Gestures"**
+> Before you pick your 3 gestures, test them on the sensor panel. Do they light up different bars? If two gestures make the same bars move the same way, the AI will struggle to tell them apart.
+
+This is the payoff — students now use the panel as a *design tool* to pick gestures that are sensor-distinct, not just visually distinct. Kids who do this will get higher accuracy and perform better in The Swap Challenge.
 
 ---
 
 ## Hour 2: "Teach Your AI" (60 min)
 
-### What Makes Good Training Data? (10 min)
+### What Makes Good Training Data? (5 min)
 
 Show two examples side by side:
 
@@ -89,11 +115,11 @@ Each student picks 3 gestures on the setup screen. Encourage creativity:
 - "Throw a ball"
 - "Brush your teeth"
 
-**Rule:** Gestures must be physically distinct. If two gestures feel similar (like "small wave" and "big wave"), the AI will struggle. This is a great teaching moment when it happens.
+**Rule:** Gestures must be physically distinct. If two gestures feel similar (like "small wave" and "big wave"), the AI will struggle. This is a great teaching moment when it happens. Students who did the sensor challenges will already know to check the panel before committing.
 
 Students can rename the defaults, remove them, or add new ones (up to 8).
 
-### Collect Training Data (25 min)
+### Collect Training Data (30 min)
 
 Students record 10+ samples per gesture:
 
