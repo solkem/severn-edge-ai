@@ -23,7 +23,7 @@
 //To find a new board's hex ID, flash with an empty tabl;e and check serial output
 struct DeviceMapping { uint16_t hexId; uint8_t classroomNum; };
 static const DeviceMapping DEVICE_MAP[] = {
-  {0x6F7B, 8},{0x4320, 2}
+  {0x91D8,1},{0x4320, 2}, {0xA192, 3}, {0x73DA,4},{0x3F26, 5},{0x6F7B, 8},
   //Add more boards here: {0xXXXX, N}
 };
 
