@@ -79,7 +79,7 @@ export function ConnectPage({ onConnected }: ConnectPageProps) {
                 </h3>
                 <div className="grid gap-3">
                   {[
-                    { icon: '🔋', text: 'Power on your Arduino (orange LED)' },
+                    { icon: '🔋', text: 'Power on your Arduino (green LED)' },
                     { icon: '📱', text: 'Enable Bluetooth on your device' },
                     { icon: '📏', text: 'Keep the Arduino close (within 30 feet)' },
                   ].map((item, idx) => (
