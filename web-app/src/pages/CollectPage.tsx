@@ -443,15 +443,14 @@ export function CollectPage({ onComplete }: CollectPageProps) {
                     />
                   </div>
                   <p className="text-center text-sm text-slate-500 mt-2">Recording...</p>
-                  <SensorPeek packet={livePacket} />
                 </div>
               ) : (
                 <div className="text-center py-8 text-slate-400">
                   <div className="text-6xl mb-4 opacity-50">👆</div>
                   <p className="text-lg">Select a gesture below to start recording</p>
-                  <SensorPeek packet={null} />
                 </div>
               )}
+              <SensorPeek packet={isRecording ? livePacket : null} />
             </div>
           </div>
 
