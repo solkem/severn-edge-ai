@@ -19,6 +19,15 @@
 // This helps students identify their specific device!
 #define DEVICE_NAME_PREFIX "SevernEdgeAI"
 #define DEVICE_NAME_MAX_LEN 20
+//Lookup table: map hardware hex IDs to classroom numbers
+//To find a new board's hex ID, flash with an empty tabl;e and check serial output
+struct DeviceMapping { uint16_t hexId; uint8_t classroomNum; };
+static const DeviceMapping DEVICE_MAP[] = {
+  {0x6F7B, 8},{0x4320, 2}
+  //Add more boards here: {0xXXXX, N}
+};
+
+#define DEVICE_MAP_SIZE (sizeof(DEVICE_MAP) / sizeof(DEVICE_MAP[0]))
 
 // ============================================================================
 // BLE UUIDs (Severn Edge AI Service)

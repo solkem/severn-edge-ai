@@ -57,9 +57,34 @@ void getUniqueDeviceId(char* buffer, size_t len) {
 /**
  * Build the unique device name: "EdgeAI-XXXX"
  */
-void buildDeviceName() {
+
+ /*
+ DEPRECATED FOR NOW
+ void buildDeviceName() {
     char uniqueId[8];
     getUniqueDeviceId(uniqueId, sizeof(uniqueId));
+    snprintf(deviceName, sizeof(deviceName), "%s-%s", DEVICE_NAME_PREFIX, uniqueId);
+}
+*/
+
+/**
+ * Build the unique device name: "SevernEdgeAI-N" (friendly) or "SevernEdgeAI-XXXX" (fallback)
+*/
+void buildDeviceName(){
+    char uniqueId[8];
+    getUniqueDeviceId(uniqueId, sizeof(uniqueId));
+    // Convert hex string back to uint16 for table lookup
+    uint16_t hwId = (uint16_t)strtoul(uniqueId, nullptr, 16);
+
+    //Check lookup table for a friendly classroom number
+    for(size_t i = 0;i < DEVICE_MAP_SIZE; i++){
+        if(DEVICE_MAP[i].hexId == hwId){
+            snprintf(deviceName, sizeof(deviceName), "%s-%u",
+                DEVICE_NAME_PREFIX, DEVICE_MAP[i].classroomNum);
+                return;
+        }
+    }
+    //Fallback: use raw hex ID for unknown boards
     snprintf(deviceName, sizeof(deviceName), "%s-%s", DEVICE_NAME_PREFIX, uniqueId);
 }
 
