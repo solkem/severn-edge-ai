@@ -38,6 +38,9 @@ export const COLLECTION_CONFIG = {
   SAMPLE_DURATION_MS: 4000, // 4 seconds per sample
   SAMPLES_PER_GESTURE: 10,
   DEFAULT_GESTURES: ['Wave', 'Shake', 'Circle'],
+  MIN_GESTURES: 2,            // Minimum for ML classification
+  MAX_GESTURES: 8,            // Matches firmware NN_MAX_CLASSES
+  MAX_GESTURE_NAME_LENGTH: 15, // BLE label name limit
 };
 
 // ============================================================================
