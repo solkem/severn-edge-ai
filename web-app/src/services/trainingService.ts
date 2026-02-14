@@ -130,10 +130,47 @@ export class TrainingService {
   }
 
   /**
-   * Prepare training data from samples with augmentation
+   * Generate synthetic "Idle" samples (device sitting still on a table).
+   * Used when only 1 gesture class is defined, so we can create a 2-class
+   * model (gesture vs idle) that actually distinguishes motion from stillness.
+   */
+  private generateIdleSamples(count: number): number[][][] {
+    const idleSamples: number[][][] = [];
+    for (let i = 0; i < count; i++) {
+      const sample: number[][] = [];
+      for (let t = 0; t < MODEL_CONFIG.WINDOW_SIZE; t++) {
+        // Simulate a still device: ~0g on X/Y, ~1g on Z (gravity), ~0 dps gyro
+        // Add small noise to make it realistic
+        sample.push([
+          (Math.random() - 0.5) * 0.05 / NORM_ACCEL,   // ax ≈ 0
+          (Math.random() - 0.5) * 0.05 / NORM_ACCEL,   // ay ≈ 0
+          (1.0 + (Math.random() - 0.5) * 0.05) / NORM_ACCEL, // az ≈ 1g
+          (Math.random() - 0.5) * 5.0 / NORM_GYRO,     // gx ≈ 0
+          (Math.random() - 0.5) * 5.0 / NORM_GYRO,     // gy ≈ 0
+          (Math.random() - 0.5) * 5.0 / NORM_GYRO,     // gz ≈ 0
+        ]);
+      }
+      idleSamples.push(sample);
+    }
+    return idleSamples;
+  }
+
+  /**
+   * Prepare training data from samples with augmentation.
+   *
+   * Special case: if only 1 gesture class exists, synthetic "Idle" data is
+   * auto-generated so that tf.oneHot (which requires depth >= 2) works AND
+   * the resulting model can distinguish the gesture from no motion.
    */
   prepareData(samples: Sample[], labels: GestureLabel[]) {
-    const labelMap = new Map(labels.map((l, idx) => [l.id, idx]));
+    // When there's only 1 gesture, add a synthetic "Idle" class
+    const isSingleGesture = labels.length === 1;
+    const effectiveLabels = isSingleGesture
+      ? [...labels, { id: '__idle__', name: 'Idle', sampleCount: 0 }]
+      : labels;
+    const numClasses = effectiveLabels.length;
+
+    const labelMap = new Map(effectiveLabels.map((l, idx) => [l.id, idx]));
 
     const xs: number[][][] = [];
     const ys: number[] = [];
@@ -168,13 +205,25 @@ export class TrainingService {
       }
     }
 
-    console.log(`Prepared ${xs.length} samples (${samples.length} original + ${samples.length * 2} augmented)`);
+    // Auto-generate Idle samples for single-gesture mode
+    if (isSingleGesture) {
+      const idleClassIdx = labelMap.get('__idle__')!;
+      // Generate same number of idle samples as real gesture samples (with augmentation)
+      const idleSamples = this.generateIdleSamples(samples.length * 3);
+      for (const idleSample of idleSamples) {
+        xs.push(idleSample);
+        ys.push(idleClassIdx);
+      }
+      console.log(`Single-gesture mode: added ${idleSamples.length} synthetic Idle samples`);
+    }
+
+    console.log(`Prepared ${xs.length} samples (${samples.length} original + augmented${isSingleGesture ? ' + idle' : ''}), ${numClasses} classes`);
 
     // Convert to tensors
     const xTensor = tf.tensor3d(xs);
-    const yTensor = tf.oneHot(tf.tensor1d(ys, 'int32'), labels.length);
+    const yTensor = tf.oneHot(tf.tensor1d(ys, 'int32'), numClasses);
 
-    return { xTensor, yTensor };
+    return { xTensor, yTensor, effectiveLabels };
   }
 
   /**
@@ -187,13 +236,14 @@ export class TrainingService {
   ): Promise<TrainingResult> {
     console.log(`Training SimpleNN with ${samples.length} samples, ${labels.length} classes`);
 
-    // Create or reuse model (for progressive training)
-    if (!this.model || this.model.outputShape[1] !== labels.length) {
-      this.model = this.createModel(labels.length);
-    }
+    // Prepare data with normalization (may add synthetic Idle class for single-gesture)
+    const { xTensor, yTensor, effectiveLabels } = this.prepareData(samples, labels);
+    const numClasses = effectiveLabels.length;
 
-    // Prepare data with normalization
-    const { xTensor, yTensor } = this.prepareData(samples, labels);
+    // Create or reuse model (for progressive training)
+    if (!this.model || this.model.outputShape[1] !== numClasses) {
+      this.model = this.createModel(numClasses);
+    }
 
     // Log data statistics for debugging
     const dataStats = xTensor.mean().dataSync()[0];

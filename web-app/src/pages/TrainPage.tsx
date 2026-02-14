@@ -41,14 +41,16 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
 
   // Create untrained model when labels are available
   useEffect(() => {
-    if (labels.length >= 2 && !hasModel) {
+    if (labels.length >= 1 && !hasModel) {
       createUntrainedModel();
     }
   }, [labels]);
 
   const createUntrainedModel = () => {
     try {
-      trainingService.createModel(labels.length);
+      // Use at least 2 classes (single-gesture mode auto-adds Idle during training)
+      const numClasses = Math.max(2, labels.length);
+      trainingService.createModel(numClasses);
       setHasModel(true);
       console.log('Created untrained model with random weights');
     } catch (err) {
@@ -138,7 +140,10 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
         throw new Error('Failed to initialize model upload. Make sure your Arduino firmware supports OTA model updates.');
       }
 
-      const labelNames = labels.map(l => l.name);
+      // When single-gesture mode, the model has an auto-added "Idle" class
+      const labelNames = labels.length === 1
+        ? [...labels.map(l => l.name), 'Idle']
+        : labels.map(l => l.name);
       await bleModelUploadService.uploadModel(modelBytes, labelNames, (progress) => {
         setUploadProgress(progress);
       });

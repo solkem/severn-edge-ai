@@ -4,15 +4,15 @@
  * ============================================================================
  * EDUCATIONAL IMPLEMENTATION
  * ============================================================================
- * 
+ *
  * Handles over-the-air model deployment to Arduino via Bluetooth Low Energy.
  * Uploads SimpleNN weights (real trained weights!) to the Arduino.
- * 
+ *
  * See firmware/docs/NEURAL_NETWORK_BASICS.md for how the neural network works.
  */
 
-import { BLE_UUIDS } from '../config/constants';
-import { calculateCrc32 } from './modelExportService';
+import { BLE_UUIDS } from "../config/constants";
+import { calculateCrc32 } from "./modelExportService";
 
 // Model upload control commands (must match firmware)
 const MODEL_CMD_START = 0x01;
@@ -26,8 +26,11 @@ const STATUS_SUCCESS = 0x04;
 // BLE characteristic max write size (conservative for compatibility)
 const MAX_CHUNK_SIZE = 200;
 
+// How many chunks between status checks (fail fast on errors)
+const STATUS_CHECK_INTERVAL = 50;
+
 export interface UploadProgress {
-  state: 'idle' | 'starting' | 'uploading' | 'completing' | 'success' | 'error';
+  state: "idle" | "starting" | "uploading" | "completing" | "success" | "error";
   progress: number;
   bytesTransferred: number;
   totalBytes: number;
@@ -43,17 +46,21 @@ export class BLEModelUploadService {
 
   async initialize(server: BluetoothRemoteGATTServer): Promise<boolean> {
     try {
-      console.log('Initializing SimpleNN model upload service...');
-      
-      const service = await server.getPrimaryService(BLE_UUIDS.SERVICE);
-      
-      this.modelUploadChar = await service.getCharacteristic(BLE_UUIDS.MODEL_UPLOAD);
-      this.modelStatusChar = await service.getCharacteristic(BLE_UUIDS.MODEL_STATUS);
+      console.log("Initializing SimpleNN model upload service...");
 
-      console.log('Model upload service initialized');
+      const service = await server.getPrimaryService(BLE_UUIDS.SERVICE);
+
+      this.modelUploadChar = await service.getCharacteristic(
+        BLE_UUIDS.MODEL_UPLOAD,
+      );
+      this.modelStatusChar = await service.getCharacteristic(
+        BLE_UUIDS.MODEL_STATUS,
+      );
+
+      console.log("Model upload service initialized");
       return true;
     } catch (error) {
-      console.error('Failed to initialize model upload service:', error);
+      console.error("Failed to initialize model upload service:", error);
       return false;
     }
   }
@@ -64,7 +71,7 @@ export class BLEModelUploadService {
 
   /**
    * Upload trained model weights to the Arduino
-   * 
+   *
    * @param modelData - SimpleNN weight data as Uint8Array
    * @param classLabels - Array of class label names
    * @param onProgress - Callback for upload progress updates
@@ -72,27 +79,30 @@ export class BLEModelUploadService {
   async uploadModel(
     modelData: Uint8Array,
     classLabels: string[] = [],
-    onProgress?: UploadProgressCallback
+    onProgress?: UploadProgressCallback,
   ): Promise<boolean> {
     if (!this.isReady()) {
-      throw new Error('Upload service not initialized');
+      throw new Error("Upload service not initialized");
     }
 
     if (this.isUploading) {
-      throw new Error('Upload already in progress');
+      throw new Error("Upload already in progress");
     }
 
     this.isUploading = true;
     const totalBytes = modelData.length;
 
     const reportProgress = (
-      state: UploadProgress['state'],
+      state: UploadProgress["state"],
       bytesTransferred: number,
-      message: string
+      message: string,
     ) => {
       onProgress?.({
         state,
-        progress: totalBytes > 0 ? Math.round((bytesTransferred / totalBytes) * 100) : 0,
+        progress:
+          totalBytes > 0
+            ? Math.round((bytesTransferred / totalBytes) * 100)
+            : 0,
         bytesTransferred,
         totalBytes,
         message,
@@ -102,19 +112,30 @@ export class BLEModelUploadService {
     try {
       const crc32 = calculateCrc32(modelData);
       // Debug: Show first 16 bytes being uploaded
-      
-      console.log(`Starting SimpleNN upload: ${totalBytes} bytes, CRC32: 0x${crc32.toString(16)}`);
-      console.log(`Classes: ${classLabels.join(', ')}`);
+
+      console.log(
+        `Starting SimpleNN upload: ${totalBytes} bytes, CRC32: 0x${crc32.toString(16)}`,
+      );
+      console.log(`Classes: ${classLabels.join(", ")}`);
 
       // Step 1: Send START command
-      reportProgress('starting', 0, 'Initiating upload...');
+      reportProgress("starting", 0, "Initiating upload...");
       await this.sendStartCommand(totalBytes, crc32, classLabels);
-      console.log('START command sent');
-      await this.delay(200);
+      console.log("START command sent");
+      await this.delay(300);
+
+      // Verify the Arduino accepted the START command
+      const startStatus = await this.readStatus();
+      if (startStatus.statusCode >= 10) {
+        throw new Error(
+          `Arduino rejected upload start (status: ${startStatus.statusCode})`,
+        );
+      }
 
       // Step 2: Send model data in chunks
-      reportProgress('uploading', 0, 'Uploading neural network weights...');
+      reportProgress("uploading", 0, "Uploading neural network weights...");
       let offset = 0;
+      let chunkCount = 0;
       const dataChunkSize = MAX_CHUNK_SIZE - 5;
 
       while (offset < totalBytes) {
@@ -124,36 +145,51 @@ export class BLEModelUploadService {
 
         await this.sendChunkCommand(offset, chunk);
         offset += chunkSize;
+        chunkCount++;
 
         const pct = Math.round((offset / totalBytes) * 100);
-        reportProgress('uploading', offset, `Uploading... ${pct}%`);
-        
-        await this.delay(50);
+        reportProgress("uploading", offset, `Uploading... ${pct}%`);
+
+        // Periodic status check to fail fast on errors
+        if (chunkCount % STATUS_CHECK_INTERVAL === 0) {
+          await this.delay(50);
+          const midStatus = await this.readStatus();
+          if (midStatus.statusCode >= 10) {
+            throw new Error(
+              `Upload failed at chunk ${chunkCount} (status: ${midStatus.statusCode})`,
+            );
+          }
+        }
+
+        await this.delay(100);
       }
 
-      console.log('All weight data sent');
+      console.log("All weight data sent");
 
       // Step 3: Send COMPLETE command
-      reportProgress('completing', totalBytes, 'Finalizing upload...');
+      reportProgress("completing", totalBytes, "Finalizing upload...");
       await this.sendCompleteCommand();
-      console.log('COMPLETE command sent');
+      console.log("COMPLETE command sent");
 
       await this.delay(1000);
-      
+
       const status = await this.readStatus();
-      console.log('Final status:', status);
+      console.log("Final status:", status);
 
       if (status.statusCode === STATUS_SUCCESS) {
-        reportProgress('success', totalBytes, 'Model deployed! Your Arduino is now smart! ');
+        reportProgress(
+          "success",
+          totalBytes,
+          "Model deployed! Your Arduino is now smart! ",
+        );
         return true;
       } else {
         throw new Error(`Upload failed with status code: ${status.statusCode}`);
       }
-
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Upload error:', error);
-      reportProgress('error', 0, `Upload failed: ${message}`);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      console.error("Upload error:", error);
+      reportProgress("error", 0, `Upload failed: ${message}`);
 
       try {
         await this.sendCancelCommand();
@@ -174,12 +210,16 @@ export class BLEModelUploadService {
     this.isUploading = false;
   }
 
-  private async sendStartCommand(modelSize: number, crc32: number, labels: string[]): Promise<void> {
+  private async sendStartCommand(
+    modelSize: number,
+    crc32: number,
+    labels: string[],
+  ): Promise<void> {
     const numClasses = Math.min(labels.length, 8);
 
-    let labelsData = '';
+    let labelsData = "";
     for (let i = 0; i < numClasses; i++) {
-      labelsData += labels[i].substring(0, 15) + '\0';
+      labelsData += labels[i].substring(0, 15) + "\0";
     }
     const labelsBytes = new TextEncoder().encode(labelsData);
 
@@ -187,16 +227,16 @@ export class BLEModelUploadService {
     data[0] = MODEL_CMD_START;
 
     // Model size (4 bytes, little-endian)
-    data[1] = modelSize & 0xFF;
-    data[2] = (modelSize >> 8) & 0xFF;
-    data[3] = (modelSize >> 16) & 0xFF;
-    data[4] = (modelSize >> 24) & 0xFF;
+    data[1] = modelSize & 0xff;
+    data[2] = (modelSize >> 8) & 0xff;
+    data[3] = (modelSize >> 16) & 0xff;
+    data[4] = (modelSize >> 24) & 0xff;
 
     // CRC32 (4 bytes, little-endian)
-    data[5] = crc32 & 0xFF;
-    data[6] = (crc32 >> 8) & 0xFF;
-    data[7] = (crc32 >> 16) & 0xFF;
-    data[8] = (crc32 >> 24) & 0xFF;
+    data[5] = crc32 & 0xff;
+    data[6] = (crc32 >> 8) & 0xff;
+    data[7] = (crc32 >> 16) & 0xff;
+    data[8] = (crc32 >> 24) & 0xff;
 
     // Number of classes
     data[9] = numClasses;
@@ -207,14 +247,17 @@ export class BLEModelUploadService {
     await this.modelUploadChar!.writeValueWithResponse(data);
   }
 
-  private async sendChunkCommand(offset: number, chunk: Uint8Array): Promise<void> {
+  private async sendChunkCommand(
+    offset: number,
+    chunk: Uint8Array,
+  ): Promise<void> {
     const data = new Uint8Array(5 + chunk.length);
     data[0] = MODEL_CMD_CHUNK;
 
-    data[1] = offset & 0xFF;
-    data[2] = (offset >> 8) & 0xFF;
-    data[3] = (offset >> 16) & 0xFF;
-    data[4] = (offset >> 24) & 0xFF;
+    data[1] = offset & 0xff;
+    data[2] = (offset >> 8) & 0xff;
+    data[3] = (offset >> 16) & 0xff;
+    data[4] = (offset >> 24) & 0xff;
 
     data.set(chunk, 5);
 
@@ -231,17 +274,21 @@ export class BLEModelUploadService {
     await this.modelUploadChar!.writeValueWithResponse(data);
   }
 
-  private async readStatus(): Promise<{ state: number; progress: number; statusCode: number }> {
+  private async readStatus(): Promise<{
+    state: number;
+    progress: number;
+    statusCode: number;
+  }> {
     const value = await this.modelStatusChar!.readValue();
     return {
       state: value.getUint8(0),
       progress: value.getUint8(1),
-      statusCode: value.getUint8(2)
+      statusCode: value.getUint8(2),
     };
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

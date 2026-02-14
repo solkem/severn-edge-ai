@@ -305,9 +305,9 @@ void handleModelUpload() {
 void setup() {
   // Initialize serial for debugging
   Serial.begin(115200);
-  delay(1000) // Wait for serial connection
+  delay(1000); // Wait for serial connection
 
-      DEBUG_PRINTLN("=================================");
+  DEBUG_PRINTLN("=================================");
   DEBUG_PRINTLN("Severn Edge AI v1.1");
   DEBUG_PRINTLN("=================================");
 
@@ -426,6 +426,14 @@ void loop() {
 
       // Handle model upload commands
       handleModelUpload();
+
+      // Skip sensor sampling during model upload to keep the main loop fast.
+      // This prevents BLE chunk writes from being missed due to the firmware
+      // being busy with sensor reads while the next chunk arrives.
+      if (getUploadState() == UPLOAD_RECEIVING) {
+        delay(1);
+        continue;
+      }
 
       // Sample at configured rate
       if (millis() - lastSampleTime >= sampleIntervalMs) {
