@@ -146,8 +146,9 @@ Flash the same firmware to all boards — each resolves its own name at boot.
 ## Documentation
 
 - [Classroom Guide](docs/CLASSROOM_GUIDE.md) — 3-hour lesson plan with The Swap Challenge contest
+- [AI Context](docs/AI_CONTEXT.md) — Complete project context for AI agents
 - [Neural Network Basics](firmware/docs/NEURAL_NETWORK_BASICS.md) — Educational explanation for students
-- [CLAUDE.md](CLAUDE.md) — AI assistant context for this codebase
+- [CLAUDE.md](CLAUDE.md) — AI assistant development context
 
 ## License
 
