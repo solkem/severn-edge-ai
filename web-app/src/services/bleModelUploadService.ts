@@ -11,7 +11,7 @@
  * See firmware/docs/NEURAL_NETWORK_BASICS.md for how the neural network works.
  */
 
-import { BLE_UUIDS } from "../config/constants";
+import { BLE_UUIDS, LABEL_MAX_LEN, NN_MAX_CLASSES } from "../config/constants";
 import { calculateCrc32 } from "./modelExportService";
 
 // Model upload control commands (must match firmware)
@@ -23,8 +23,9 @@ const MODEL_CMD_CANCEL = 0x04;
 // Upload status subcodes
 const STATUS_SUCCESS = 0x04;
 
-// BLE characteristic max write size (conservative for compatibility)
-const MAX_CHUNK_SIZE = 200;
+// BLE characteristic max write size.
+// Keep this below MTU edge cases to avoid controller/library fragmentation quirks.
+const MAX_CHUNK_SIZE = 160;
 
 // How many chunks between status checks (fail fast on errors)
 const STATUS_CHECK_INTERVAL = 50;
@@ -111,16 +112,30 @@ export class BLEModelUploadService {
 
     try {
       const crc32 = calculateCrc32(modelData);
-      // Debug: Show first 16 bytes being uploaded
+      const first16Hex = Array.from(modelData.slice(0, 16))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(" ");
+      const last16Hex = Array.from(modelData.slice(Math.max(0, modelData.length - 16)))
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(" ");
+      const payloadNumClasses =
+        modelData.length >= 8
+          ? (modelData[4] |
+              (modelData[5] << 8) |
+              (modelData[6] << 16) |
+              (modelData[7] << 24)) >>> 0
+          : classLabels.length;
 
       console.log(
         `Starting SimpleNN upload: ${totalBytes} bytes, CRC32: 0x${crc32.toString(16)}`,
       );
       console.log(`Classes: ${classLabels.join(", ")}`);
+      console.log(`Payload first 16 bytes: ${first16Hex}`);
+      console.log(`Payload last 16 bytes: ${last16Hex}`);
 
       // Step 1: Send START command
       reportProgress("starting", 0, "Initiating upload...");
-      await this.sendStartCommand(totalBytes, crc32, classLabels);
+      await this.sendStartCommand(totalBytes, crc32, payloadNumClasses, classLabels);
       console.log("START command sent");
       await this.delay(300);
 
@@ -213,13 +228,14 @@ export class BLEModelUploadService {
   private async sendStartCommand(
     modelSize: number,
     crc32: number,
+    numClassesFromPayload: number,
     labels: string[],
   ): Promise<void> {
-    const numClasses = Math.min(labels.length, 8);
+    const numClasses = Math.min(numClassesFromPayload || labels.length, NN_MAX_CLASSES);
 
     let labelsData = "";
     for (let i = 0; i < numClasses; i++) {
-      labelsData += labels[i].substring(0, 15) + "\0";
+      labelsData += (labels[i] ?? "").substring(0, LABEL_MAX_LEN - 1) + "\0";
     }
     const labelsBytes = new TextEncoder().encode(labelsData);
 

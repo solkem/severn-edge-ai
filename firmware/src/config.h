@@ -73,6 +73,7 @@ static const DeviceMapping DEVICE_MAP[] = {
 #define NN_INPUT_SIZE 600 // 100 samples × 6 axes = 600
 #define NN_HIDDEN_SIZE 32 // Hidden layer neurons
 #define NN_MAX_CLASSES 8  // Maximum gesture classes
+#define LABEL_MAX_LEN 16  // Fixed-width class label storage
 
 // Model weight buffer sizes
 // hiddenWeights: 32 × 600 = 19,200 floats = 76,800 bytes
@@ -98,7 +99,7 @@ static const DeviceMapping DEVICE_MAP[] = {
 // ============================================================================
 #define WINDOW_SIZE 100 // Number of samples in sliding window
 #define WINDOW_STRIDE                                                          \
-  25 // Samples to slide after inference (1 sec @ 25Hz = faster response!)
+  10 // Samples to slide after inference (0.4 sec @ 25Hz = faster response)
 #define NUM_CLASSES 3 // Default number of gesture classes
 
 // ============================================================================

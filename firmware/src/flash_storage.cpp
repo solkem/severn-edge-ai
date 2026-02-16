@@ -28,7 +28,7 @@ static UploadState currentUploadState = UPLOAD_IDLE;
 static uint32_t bytesReceived = 0;
 static uint32_t expectedSize = 0;
 static uint32_t uploadNumClasses = 0;
-static char uploadLabels[NN_MAX_CLASSES][16];
+static char uploadLabels[NN_MAX_CLASSES][LABEL_MAX_LEN];
 
 // ============================================================================
 // CRC32 Implementation (IEEE 802.3 polynomial)
@@ -41,7 +41,7 @@ static const uint32_t crc32Table[256] = {
     0x136C9856, 0x646BA8C0, 0xFD62F97A, 0x8A65C9EC, 0x14015C4F, 0x63066CD9,
     0xFA0F3D63, 0x8D080DF5, 0x3B6E20C8, 0x4C69105E, 0xD56041E4, 0xA2677172,
     0x3C03E4D1, 0x4B04D447, 0xD20D85FD, 0xA50AB56B, 0x35B5A8FA, 0x42B2986C,
-    0xDBBBBBD6, 0xACBCCB40, 0x32D86CE3, 0x45DF5C75, 0xDCD60DCF, 0xABD13D59,
+    0xDBBBC9D6, 0xACBCF940, 0x32D86CE3, 0x45DF5C75, 0xDCD60DCF, 0xABD13D59,
     0x26D930AC, 0x51DE003A, 0xC8D75180, 0xBFD06116, 0x21B4F4B5, 0x56B3C423,
     0xCFBA9599, 0xB8BDA50F, 0x2802B89E, 0x5F058808, 0xC60CD9B2, 0xB10BE924,
     0x2F6F7C87, 0x58684C11, 0xC1611DAB, 0xB6662D3D, 0x76DC4190, 0x01DB7106,
@@ -55,7 +55,7 @@ static const uint32_t crc32Table[256] = {
     0x44042D73, 0x33031DE5, 0xAA0A4C5F, 0xDD0D7CC9, 0x5005713C, 0x270241AA,
     0xBE0B1010, 0xC90C2086, 0x5768B525, 0x206F85B3, 0xB966D409, 0xCE61E49F,
     0x5EDEF90E, 0x29D9C998, 0xB0D09822, 0xC7D7A8B4, 0x59B33D17, 0x2EB40D81,
-    0xB7BD5C3B, 0xC0BA6CAD, 0xEDB88320, 0x9ABFB3B0, 0x03B6E20C, 0x74B1D29A,
+    0xB7BD5C3B, 0xC0BA6CAD, 0xEDB88320, 0x9ABFB3B6, 0x03B6E20C, 0x74B1D29A,
     0xEAD54739, 0x9DD277AF, 0x04DB2615, 0x73DC1683, 0xE3630B12, 0x94643B84,
     0x0D6D6A3E, 0x7A6A5AA8, 0xE40ECF0B, 0x9309FF9D, 0x0A00AE27, 0x7D079EB1,
     0xF00F9344, 0x8708A3D2, 0x1E01F268, 0x6906C2FE, 0xF762575D, 0x806567CB,
@@ -74,7 +74,7 @@ static const uint32_t crc32Table[256] = {
     0x616BFFD3, 0x166CCF45, 0xA00AE278, 0xD70DD2EE, 0x4E048354, 0x3903B3C2,
     0xA7672661, 0xD06016F7, 0x4969474D, 0x3E6E77DB, 0xAED16A4A, 0xD9D65ADC,
     0x40DF0B66, 0x37D83BF0, 0xA9BCAE53, 0xDEBB9EC5, 0x47B2CF7F, 0x30B5FFE9,
-    0xBDBDF21C, 0xCABAC28A, 0x53B39330, 0x24B4A3A6, 0xBAD03605, 0xCDD706B3,
+    0xBDBDF21C, 0xCABAC28A, 0x53B39330, 0x24B4A3A6, 0xBAD03605, 0xCDD70693,
     0x54DE5729, 0x23D967BF, 0xB3667A2E, 0xC4614AB8, 0x5D681B02, 0x2A6F2B94,
     0xB40BBE37, 0xC30C8EA1, 0x5A05DF1B, 0x2D02EF8D
 };
@@ -125,9 +125,7 @@ const SimpleNNModel* getStoredSimpleNNModel() {
 
 uint32_t getStoredModelSize() {
     if (!hasStoredModel()) return 0;
-    // Return the size of weight data only (not the full struct)
-    return sizeof(storedModel.hiddenWeights) + sizeof(storedModel.hiddenBias) +
-           sizeof(storedModel.outputWeights) + sizeof(storedModel.outputBias);
+    return sizeof(SimpleNNModel);
 }
 
 uint32_t getStoredModelNumClasses() {
@@ -149,8 +147,11 @@ void beginModelUpload(uint32_t totalSize, uint32_t numClasses) {
     DEBUG_PRINT(numClasses);
     DEBUG_PRINTLN(" classes");
     
-    if (totalSize > sizeof(uploadBuffer)) {
-        DEBUG_PRINTLN("Model too large!");
+    if (totalSize != sizeof(uploadBuffer)) {
+        DEBUG_PRINT("Invalid model size, expected ");
+        DEBUG_PRINT(sizeof(uploadBuffer));
+        DEBUG_PRINT(" got ");
+        DEBUG_PRINTLN(totalSize);
         currentUploadState = UPLOAD_ERROR;
         return;
     }
@@ -173,6 +174,15 @@ bool receiveModelChunk(const uint8_t* data, uint16_t length, uint32_t offset) {
     
     if (offset + length > sizeof(uploadBuffer)) {
         DEBUG_PRINTLN("Chunk exceeds buffer size");
+        currentUploadState = UPLOAD_ERROR;
+        return false;
+    }
+
+    if (offset + length > expectedSize) {
+        DEBUG_PRINT("Chunk exceeds expected upload size: end=");
+        DEBUG_PRINT(offset + length);
+        DEBUG_PRINT(" expectedSize=");
+        DEBUG_PRINTLN(expectedSize);
         currentUploadState = UPLOAD_ERROR;
         return false;
     }
@@ -204,8 +214,8 @@ bool receiveModelChunk(const uint8_t* data, uint16_t length, uint32_t offset) {
 void setModelLabel(uint8_t classIndex, const char* label) {
     if (classIndex >= NN_MAX_CLASSES) return;
     
-    strncpy(uploadLabels[classIndex], label, 15);
-    uploadLabels[classIndex][15] = '\0';
+    strncpy(uploadLabels[classIndex], label, LABEL_MAX_LEN - 1);
+    uploadLabels[classIndex][LABEL_MAX_LEN - 1] = '\0';
     
     DEBUG_PRINT("Label ");
     DEBUG_PRINT(classIndex);
@@ -228,66 +238,90 @@ UploadStatus finalizeModelUpload(uint32_t expectedCrc32) {
         currentUploadState = UPLOAD_ERROR;
         return STATUS_ERROR_SIZE;
     }
+
+    if (bytesReceived != sizeof(SimpleNNModel)) {
+        DEBUG_PRINT("Unexpected payload size, expected ");
+        DEBUG_PRINT(sizeof(SimpleNNModel));
+        DEBUG_PRINT(" got ");
+        DEBUG_PRINTLN(bytesReceived);
+        currentUploadState = UPLOAD_ERROR;
+        return STATUS_ERROR_SIZE;
+    }
     
+    DEBUG_PRINT("Finalize sizes: expectedSize=");
+    DEBUG_PRINT(expectedSize);
+    DEBUG_PRINT(" bytesReceived=");
+    DEBUG_PRINTLN(bytesReceived);
+
     // CRC Verification — reject corrupted model data
     uint32_t actualCrc = calculateCrc32(uploadBuffer, bytesReceived);
 
+    char crcBuf[144];
+    sprintf(crcBuf,
+            "Upload CRC check: expectedSize=%lu bytesReceived=%lu expected=0x%08lX actual=0x%08lX",
+            (unsigned long)expectedSize,
+            (unsigned long)bytesReceived,
+            (unsigned long)expectedCrc32,
+            (unsigned long)actualCrc);
+    DEBUG_PRINTLN(crcBuf);
+
+    char firstBytesBuf[64];
+    char* p = firstBytesBuf;
+    for (size_t i = 0; i < 16; i++) {
+        sprintf(p, "%02X", uploadBuffer[i]);
+        p += 2;
+        if (i < 15) {
+            *p++ = ' ';
+        }
+    }
+    *p = '\0';
+    DEBUG_PRINT("Payload first 16 bytes: ");
+    DEBUG_PRINTLN(firstBytesBuf);
+
+    char lastBytesBuf[64];
+    p = lastBytesBuf;
+    size_t start = bytesReceived >= 16 ? bytesReceived - 16 : 0;
+    for (size_t i = start; i < bytesReceived; i++) {
+        sprintf(p, "%02X", uploadBuffer[i]);
+        p += 2;
+        if (i + 1 < bytesReceived) {
+            *p++ = ' ';
+        }
+    }
+    *p = '\0';
+    DEBUG_PRINT("Payload last 16 bytes: ");
+    DEBUG_PRINTLN(lastBytesBuf);
+
     if (actualCrc != expectedCrc32) {
-        char crcBuf[80];
-        sprintf(crcBuf, "CRC mismatch: expected 0x%08lX, actual 0x%08lX",
-                (unsigned long)expectedCrc32, (unsigned long)actualCrc);
-        DEBUG_PRINTLN(crcBuf);
         currentUploadState = UPLOAD_ERROR;
         return STATUS_ERROR_CRC;
     }
-    
-    DEBUG_PRINTLN("Building model structure...");
-    
-    // Build the SimpleNNModel from received data
-    // The data is packed as: hiddenWeights, hiddenBias, outputWeights, outputBias
-    
-    storedModel.magic = SIMPLE_NN_MAGIC;
-    storedModel.numClasses = uploadNumClasses;
-    storedModel.inputSize = NN_INPUT_SIZE;
-    storedModel.hiddenSize = NN_HIDDEN_SIZE;
-    
-    // Copy weights from buffer
-    size_t offset = 0;
-    
-    // Hidden weights: [NN_HIDDEN_SIZE * NN_INPUT_SIZE] floats
-    size_t hiddenWeightsSize = NN_HIDDEN_SIZE * NN_INPUT_SIZE * sizeof(float);
-    memcpy(storedModel.hiddenWeights, &uploadBuffer[offset], hiddenWeightsSize);
-    offset += hiddenWeightsSize;
-    
-    // Hidden bias: [NN_HIDDEN_SIZE] floats
-    size_t hiddenBiasSize = NN_HIDDEN_SIZE * sizeof(float);
-    memcpy(storedModel.hiddenBias, &uploadBuffer[offset], hiddenBiasSize);
-    offset += hiddenBiasSize;
-    
-    // Output weights: [numClasses * NN_HIDDEN_SIZE] floats
-    size_t outputWeightsSize = uploadNumClasses * NN_HIDDEN_SIZE * sizeof(float);
-    memcpy(storedModel.outputWeights, &uploadBuffer[offset], outputWeightsSize);
-    offset += outputWeightsSize;
-    
-    // Output bias: [numClasses] floats
-    size_t outputBiasSize = uploadNumClasses * sizeof(float);
-    memcpy(storedModel.outputBias, &uploadBuffer[offset], outputBiasSize);
-    
-    // Copy labels
-    memcpy(storedModel.labels, uploadLabels, sizeof(uploadLabels));
+
+    memcpy(&storedModel, uploadBuffer, sizeof(SimpleNNModel));
+
+    if (storedModel.magic != SIMPLE_NN_MAGIC ||
+        storedModel.inputSize != NN_INPUT_SIZE ||
+        storedModel.hiddenSize != NN_HIDDEN_SIZE ||
+        storedModel.numClasses < 1 ||
+        storedModel.numClasses > NN_MAX_CLASSES) {
+        DEBUG_PRINTLN("Uploaded model header is invalid");
+        currentUploadState = UPLOAD_ERROR;
+        return STATUS_ERROR_FORMAT;
+    }
+
+    if (uploadNumClasses != 0 && uploadNumClasses != storedModel.numClasses) {
+        DEBUG_PRINT("Warning: START numClasses ");
+        DEBUG_PRINT(uploadNumClasses);
+        DEBUG_PRINT(" differs from payload header ");
+        DEBUG_PRINTLN(storedModel.numClasses);
+    }
     
     hasModel = true;
     currentUploadState = UPLOAD_COMPLETE;
     
     DEBUG_PRINTLN("SimpleNN model saved successfully!");
-    DEBUG_PRINT("  Hidden weights: ");
-    DEBUG_PRINTLN(hiddenWeightsSize);
-    DEBUG_PRINT("  Hidden bias: ");
-    DEBUG_PRINTLN(hiddenBiasSize);
-    DEBUG_PRINT("  Output weights: ");
-    DEBUG_PRINTLN(outputWeightsSize);
-    DEBUG_PRINT("  Output bias: ");
-    DEBUG_PRINTLN(outputBiasSize);
+    DEBUG_PRINT("  Classes: ");
+    DEBUG_PRINTLN(storedModel.numClasses);
     
     return STATUS_SUCCESS;
 }

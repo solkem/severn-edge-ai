@@ -115,7 +115,7 @@ BLECharacteristic configChar(CONFIG_CHAR_UUID, BLERead | BLEWrite, 4);
 // Format: [cmd(1)] [offset(4)] [data(up to 239)]
 // Commands: 0x01=start, 0x02=chunk, 0x03=finish, 0x04=cancel
 BLECharacteristic modelUploadChar(MODEL_UPLOAD_UUID,
-                                  BLEWrite | BLEWriteWithoutResponse, 244);
+                                  BLEWrite, 244);
 
 // Model status: [state(1), progress(1), status_code(1), reserved(1)]
 BLECharacteristic modelStatusChar(MODEL_STATUS_UUID, BLERead | BLENotify, 4);
@@ -126,6 +126,11 @@ BLECharacteristic modelStatusChar(MODEL_STATUS_UUID, BLERead | BLENotify, 4);
 static uint32_t uploadExpectedSize = 0;
 static uint32_t uploadExpectedCrc = 0;
 static uint8_t uploadNumClasses = 0;
+
+static uint32_t readU32LE(const uint8_t *bytes) {
+  return ((uint32_t)bytes[0]) | ((uint32_t)bytes[1] << 8) |
+         ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
+}
 
 // ============================================================================
 // DEVICE INFO PACKET BUILDER
@@ -201,8 +206,8 @@ void handleModelUpload() {
       return;
     }
 
-    memcpy(&uploadExpectedSize, &data[1], 4);
-    memcpy(&uploadExpectedCrc, &data[5], 4);
+    uploadExpectedSize = readU32LE(&data[1]);
+    uploadExpectedCrc = readU32LE(&data[5]);
     uploadNumClasses = data[9];
 
     DEBUG_PRINT("Model upload starting: ");
@@ -210,6 +215,11 @@ void handleModelUpload() {
     DEBUG_PRINT(" bytes, ");
     DEBUG_PRINT(uploadNumClasses);
     DEBUG_PRINTLN(" classes");
+    char startBuf[128];
+    sprintf(startBuf,
+            "START crc bytes raw: %02X %02X %02X %02X -> parsed 0x%08lX",
+            data[5], data[6], data[7], data[8], (unsigned long)uploadExpectedCrc);
+    DEBUG_PRINTLN(startBuf);
 
     if (uploadExpectedSize > MAX_MODEL_SIZE) {
       updateModelStatus(UPLOAD_ERROR, 0, STATUS_ERROR_SIZE);
@@ -231,8 +241,8 @@ void handleModelUpload() {
         return;
       }
       int labelLen = (const uint8_t *)term - &data[offset];
-      char safeLabel[16] = {0};
-      int copyLen = labelLen < 15 ? labelLen : 15;
+      char safeLabel[LABEL_MAX_LEN] = {0};
+      int copyLen = labelLen < (LABEL_MAX_LEN - 1) ? labelLen : (LABEL_MAX_LEN - 1);
       memcpy(safeLabel, &data[offset], copyLen);
       setModelLabel(i, safeLabel);
       offset += labelLen + 1;
@@ -248,8 +258,7 @@ void handleModelUpload() {
       return;
     }
 
-    uint32_t offset;
-    memcpy(&offset, &data[1], 4);
+    uint32_t offset = readU32LE(&data[1]);
     uint16_t chunkLen = len - 5;
 
     if (!receiveModelChunk(&data[5], chunkLen, offset)) {

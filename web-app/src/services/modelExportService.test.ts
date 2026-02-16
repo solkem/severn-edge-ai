@@ -13,9 +13,16 @@ import { describe, it, expect } from 'vitest';
 import * as tf from '@tensorflow/tfjs';
 import {
   extractSimpleNNWeights,
+  weightsToBytes,
   calculateCrc32,
 } from './modelExportService';
-import { NN_HIDDEN_SIZE } from '../config/constants';
+import {
+  LABEL_MAX_LEN,
+  NN_HIDDEN_SIZE,
+  NN_INPUT_SIZE,
+  NN_MAX_CLASSES,
+  SIMPLE_NN_MAGIC,
+} from '../config/constants';
 
 // ---------------------------------------------------------------------------
 // Helper: create a small SimpleNN-compatible model
@@ -162,5 +169,71 @@ describe('calculateCrc32', () => {
     const a = calculateCrc32(data);
     const b = calculateCrc32(data);
     expect(a).toBe(b);
+  });
+});
+
+describe('weightsToBytes', () => {
+  it('serializes full SimpleNNModel layout with header, fixed padding, and labels', () => {
+    const numClasses = 3;
+    const hiddenWeights = new Float32Array(NN_HIDDEN_SIZE * NN_INPUT_SIZE);
+    hiddenWeights[0] = 1.25;
+    hiddenWeights[hiddenWeights.length - 1] = -2.5;
+
+    const hiddenBiases = new Float32Array(NN_HIDDEN_SIZE);
+    hiddenBiases[0] = 0.5;
+
+    const outputWeights = new Float32Array(numClasses * NN_HIDDEN_SIZE);
+    outputWeights[0] = 3.5;
+    outputWeights[outputWeights.length - 1] = -4.5;
+
+    const outputBiases = new Float32Array(numClasses);
+    outputBiases[0] = 0.75;
+    outputBiases[outputBiases.length - 1] = -0.25;
+
+    const bytes = weightsToBytes(
+      {
+        inputSize: NN_INPUT_SIZE,
+        hiddenSize: NN_HIDDEN_SIZE,
+        numClasses,
+        hiddenWeights,
+        hiddenBiases,
+        outputWeights,
+        outputBiases,
+      },
+      ['Wave', 'Shake', 'Circle']
+    );
+
+    const expectedSize =
+      16 +
+      NN_HIDDEN_SIZE * NN_INPUT_SIZE * 4 +
+      NN_HIDDEN_SIZE * 4 +
+      NN_MAX_CLASSES * NN_HIDDEN_SIZE * 4 +
+      NN_MAX_CLASSES * 4 +
+      NN_MAX_CLASSES * LABEL_MAX_LEN;
+    expect(bytes.length).toBe(expectedSize);
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    expect(view.getUint32(0, true)).toBe(SIMPLE_NN_MAGIC);
+    expect(view.getUint32(4, true)).toBe(numClasses);
+    expect(view.getUint32(8, true)).toBe(NN_INPUT_SIZE);
+    expect(view.getUint32(12, true)).toBe(NN_HIDDEN_SIZE);
+
+    const outputWeightsOffset =
+      16 + NN_HIDDEN_SIZE * NN_INPUT_SIZE * 4 + NN_HIDDEN_SIZE * 4;
+    // First trained output weight should be present.
+    expect(view.getFloat32(outputWeightsOffset, true)).toBeCloseTo(3.5, 5);
+    // First padded class (index 3) should be zero-filled.
+    const paddedClassOffset = outputWeightsOffset + (numClasses * NN_HIDDEN_SIZE * 4);
+    expect(view.getFloat32(paddedClassOffset, true)).toBeCloseTo(0, 5);
+
+    const labelsOffset =
+      outputWeightsOffset +
+      NN_MAX_CLASSES * NN_HIDDEN_SIZE * 4 +
+      NN_MAX_CLASSES * 4;
+    expect(bytes[labelsOffset]).toBe('W'.charCodeAt(0));
+    expect(bytes[labelsOffset + 1]).toBe('a'.charCodeAt(0));
+    // Unused label slots are zero-filled.
+    const unusedLabelOffset = labelsOffset + (4 * LABEL_MAX_LEN);
+    expect(bytes[unusedLabelOffset]).toBe(0);
   });
 });

@@ -65,7 +65,7 @@ struct SimpleNNModel {
     float outputBias[NN_MAX_CLASSES];                      // 8
     
     // Class labels
-    char labels[NN_MAX_CLASSES][16];                       // 8 labels × 16 chars
+    char labels[NN_MAX_CLASSES][LABEL_MAX_LEN];            // 8 labels × 16 chars
 };
 
 // Magic number: "SNNN" (Simple Neural Network)
@@ -125,7 +125,7 @@ private:
     const float* hiddenBias;
     const float* outputWeights;
     const float* outputBias;
-    const char (*labels)[16];
+    const char (*labels)[LABEL_MAX_LEN];
     
     // Working memory for inference
     float hiddenOutput[NN_HIDDEN_SIZE];

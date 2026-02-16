@@ -127,7 +127,11 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
     setUploadProgress(null);
 
     try {
-      const modelBytes = modelToSimpleNNBytes(model);
+      // When single-gesture mode, the model has an auto-added "Idle" class
+      const labelNames = labels.length === 1
+        ? [...labels.map(l => l.name), 'Idle']
+        : labels.map(l => l.name);
+      const modelBytes = modelToSimpleNNBytes(model, labelNames);
       const bleService = getBLEService();
       const server = bleService.getServer();
 
@@ -140,10 +144,6 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
         throw new Error('Failed to initialize model upload. Make sure your Arduino firmware supports OTA model updates.');
       }
 
-      // When single-gesture mode, the model has an auto-added "Idle" class
-      const labelNames = labels.length === 1
-        ? [...labels.map(l => l.name), 'Idle']
-        : labels.map(l => l.name);
       await bleModelUploadService.uploadModel(modelBytes, labelNames, (progress) => {
         setUploadProgress(progress);
       });

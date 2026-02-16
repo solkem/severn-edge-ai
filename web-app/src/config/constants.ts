@@ -49,7 +49,7 @@ export const COLLECTION_CONFIG = {
 export const MODEL_CONFIG = {
   WINDOW_SIZE: 100,
   NUM_AXES: 6,
-  WINDOW_STRIDE: 25, // For inference sliding window
+  WINDOW_STRIDE: 10, // For inference sliding window (faster test feedback)
   EPOCHS: 50, // Default training epochs
 };
 
@@ -60,6 +60,8 @@ export const MODEL_CONFIG = {
 export const NN_INPUT_SIZE = 600;    // 100 samples * 6 axes
 export const NN_HIDDEN_SIZE = 32;    // Hidden layer neurons
 export const NN_MAX_CLASSES = 8;     // Maximum gesture classes
+export const LABEL_MAX_LEN = 16;     // Must match firmware LABEL_MAX_LEN
+export const SIMPLE_NN_MAGIC = 0x4E4E4E53; // "SNNN" in little-endian bytes
 
 // ============================================================================
 // Sensor Scaling

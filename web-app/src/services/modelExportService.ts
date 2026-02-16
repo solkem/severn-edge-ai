@@ -25,9 +25,11 @@
 
 import * as tf from '@tensorflow/tfjs';
 import { 
+  LABEL_MAX_LEN,
   NN_INPUT_SIZE, 
   NN_HIDDEN_SIZE, 
-  NN_MAX_CLASSES 
+  NN_MAX_CLASSES,
+  SIMPLE_NN_MAGIC
 } from '../config/constants';
 
 /**
@@ -174,32 +176,96 @@ export function extractSimpleNNWeights(model: tf.LayersModel): SimpleNNWeights {
  * Each float is 4 bytes (32 bits), stored in little-endian format
  * (which is what most computers and the Arduino use).
  */
-export function weightsToBytes(weights: SimpleNNWeights): Uint8Array {
-  const totalFloats = 
-    weights.hiddenWeights.length +
-    weights.hiddenBiases.length +
-    weights.outputWeights.length +
-    weights.outputBiases.length;
-  
-  const buffer = new ArrayBuffer(totalFloats * 4);
+export function weightsToBytes(weights: SimpleNNWeights, labels: string[] = []): Uint8Array {
+  const expectedHiddenWeights = NN_HIDDEN_SIZE * NN_INPUT_SIZE;
+  const expectedHiddenBiases = NN_HIDDEN_SIZE;
+  const expectedOutputWeights = weights.numClasses * NN_HIDDEN_SIZE;
+  const expectedOutputBiases = weights.numClasses;
+
+  if (weights.inputSize !== NN_INPUT_SIZE) {
+    throw new Error(`Invalid input size ${weights.inputSize}; expected ${NN_INPUT_SIZE}`);
+  }
+  if (weights.hiddenSize !== NN_HIDDEN_SIZE) {
+    throw new Error(`Invalid hidden size ${weights.hiddenSize}; expected ${NN_HIDDEN_SIZE}`);
+  }
+  if (weights.numClasses < 1 || weights.numClasses > NN_MAX_CLASSES) {
+    throw new Error(`Invalid class count ${weights.numClasses}; expected 1-${NN_MAX_CLASSES}`);
+  }
+  if (weights.hiddenWeights.length !== expectedHiddenWeights) {
+    throw new Error(`Invalid hidden weights length ${weights.hiddenWeights.length}; expected ${expectedHiddenWeights}`);
+  }
+  if (weights.hiddenBiases.length !== expectedHiddenBiases) {
+    throw new Error(`Invalid hidden bias length ${weights.hiddenBiases.length}; expected ${expectedHiddenBiases}`);
+  }
+  if (weights.outputWeights.length !== expectedOutputWeights) {
+    throw new Error(`Invalid output weights length ${weights.outputWeights.length}; expected ${expectedOutputWeights}`);
+  }
+  if (weights.outputBiases.length !== expectedOutputBiases) {
+    throw new Error(`Invalid output bias length ${weights.outputBiases.length}; expected ${expectedOutputBiases}`);
+  }
+
+  const totalBytes =
+    16 + // Header: magic, numClasses, inputSize, hiddenSize
+    (NN_HIDDEN_SIZE * NN_INPUT_SIZE * 4) +
+    (NN_HIDDEN_SIZE * 4) +
+    (NN_MAX_CLASSES * NN_HIDDEN_SIZE * 4) +
+    (NN_MAX_CLASSES * 4) +
+    (NN_MAX_CLASSES * LABEL_MAX_LEN);
+
+  const buffer = new ArrayBuffer(totalBytes);
   const view = new DataView(buffer);
   
   let offset = 0;
-  
-  // Helper to write a Float32Array
-  const writeFloats = (arr: Float32Array) => {
-    for (let i = 0; i < arr.length; i++) {
-      view.setFloat32(offset, arr[i], true);  // true = little-endian
+
+  const writeUint32 = (value: number) => {
+    view.setUint32(offset, value >>> 0, true);
+    offset += 4;
+  };
+
+  // Helper to write a Float32Array with optional zero padding
+  const writeFloats = (arr: Float32Array, paddedLength: number = arr.length) => {
+    for (let i = 0; i < paddedLength; i++) {
+      if (i < arr.length) {
+        view.setFloat32(offset, arr[i], true); // true = little-endian
+      } else {
+        view.setFloat32(offset, 0, true);
+      }
       offset += 4;
     }
   };
-  
+
+  const ascii = new TextEncoder();
+  const safeLabels = labels.slice(0, NN_MAX_CLASSES);
+
+  // SimpleNNModel header
+  writeUint32(SIMPLE_NN_MAGIC);
+  writeUint32(weights.numClasses);
+  writeUint32(weights.inputSize);
+  writeUint32(weights.hiddenSize);
+
+  // Layer weights
   writeFloats(weights.hiddenWeights);
   writeFloats(weights.hiddenBiases);
-  writeFloats(weights.outputWeights);
-  writeFloats(weights.outputBiases);
+  writeFloats(weights.outputWeights, NN_MAX_CLASSES * NN_HIDDEN_SIZE);
+  writeFloats(weights.outputBiases, NN_MAX_CLASSES);
+
+  // Fixed-width class labels [NN_MAX_CLASSES][LABEL_MAX_LEN]
+  for (let classIndex = 0; classIndex < NN_MAX_CLASSES; classIndex++) {
+    const rawLabel = safeLabels[classIndex] ?? '';
+    const encoded = ascii.encode(rawLabel);
+    const copyLen = Math.min(encoded.length, LABEL_MAX_LEN - 1);
+
+    for (let i = 0; i < LABEL_MAX_LEN; i++) {
+      if (i < copyLen) {
+        view.setUint8(offset, encoded[i]);
+      } else {
+        view.setUint8(offset, 0);
+      }
+      offset += 1;
+    }
+  }
   
-  console.log(`Packed ${totalFloats} floats into ${offset} bytes`);
+  console.log(`Packed full SimpleNNModel struct into ${offset} bytes`);
   
   return new Uint8Array(buffer);
 }
@@ -207,9 +273,9 @@ export function weightsToBytes(weights: SimpleNNWeights): Uint8Array {
 /**
  * Main function: Convert TF.js model to bytes for BLE upload
  */
-export function modelToSimpleNNBytes(model: tf.LayersModel): Uint8Array {
+export function modelToSimpleNNBytes(model: tf.LayersModel, labels: string[] = []): Uint8Array {
   const weights = extractSimpleNNWeights(model);
-  return weightsToBytes(weights);
+  return weightsToBytes(weights, labels);
 }
 
 /**
@@ -254,9 +320,10 @@ export function calculateCrc32(data: Uint8Array): number {
  */
 export function exportModelToHeader(
   weights: SimpleNNWeights,
+  labels: string[] = [],
   modelName: string = 'default_model'
 ): string {
-  const bytes = weightsToBytes(weights);
+  const bytes = weightsToBytes(weights, labels);
   const crc = calculateCrc32(bytes);
   
   const bytesPerLine = 12;
@@ -320,7 +387,7 @@ export async function exportForArduino(
 ): Promise<void> {
   const weights = extractSimpleNNWeights(model);
   const labelNames = labels.map(l => l.name).join(', ');
-  const headerContent = exportModelToHeader(weights, 'gesture_model');
+  const headerContent = exportModelToHeader(weights, labels.map(l => l.name), 'gesture_model');
   
   const labelComment = [
     '',
@@ -344,5 +411,3 @@ export async function exportForArduino(
   URL.revokeObjectURL(url);
   console.log('Model exported as gesture_model.h');
 }
-
-
