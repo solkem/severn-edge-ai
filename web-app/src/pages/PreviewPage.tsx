@@ -102,20 +102,29 @@ function AxisBar({
   color: string;
   unit: string;
 }) {
-  const pct = Math.min(100, (Math.abs(value) / max) * 100);
-  const isHigh = Math.abs(value) > max * 0.7;
+  // Center-origin bar: negative values go left, positive go right
+  const clamped = Math.max(-max, Math.min(max, value));
+  const pct = (clamped / max) * 50; // -50% to +50% range
+  const isHigh = Math.abs(value) > max * 0.5;
 
   return (
     <div className="flex items-center gap-3">
       <span className="text-slate-400 font-mono text-sm w-7 text-right font-bold">{label}</span>
-      <div className="flex-1 bg-slate-700 rounded-full h-5 overflow-hidden relative">
+      <div className="flex-1 bg-slate-700 rounded-full h-6 overflow-hidden relative">
+        {/* Center line */}
+        <div className="absolute left-1/2 top-0 bottom-0 w-px bg-slate-500 z-10" />
+        {/* Value bar — grows from center */}
         <div
-          className={`${color} h-full transition-all duration-75 rounded-full`}
-          style={{ width: `${pct}%` }}
+          className={`${color} h-full absolute top-0 transition-all duration-75 rounded-full`}
+          style={{
+            left: pct >= 0 ? '50%' : `${50 + pct}%`,
+            width: `${Math.abs(pct)}%`,
+          }}
         />
-        <div className="absolute inset-0 flex items-center justify-end pr-2">
+        {/* Numeric label */}
+        <div className="absolute inset-0 flex items-center justify-end pr-2 z-20">
           <span className={`text-xs font-mono font-bold ${isHigh ? 'text-white' : 'text-slate-400'}`}>
-            {value.toFixed(2)}
+            {value >= 0 ? '+' : ''}{value.toFixed(2)}
           </span>
         </div>
       </div>
@@ -286,9 +295,9 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
                   </span>
                 </div>
                 <div className="space-y-2">
-                  <AxisBar label="ax" value={packet?.ax ?? 0} max={4} color="bg-red-400" unit="g" />
-                  <AxisBar label="ay" value={packet?.ay ?? 0} max={4} color="bg-red-400" unit="g" />
-                  <AxisBar label="az" value={packet?.az ?? 0} max={4} color="bg-red-400" unit="g" />
+                  <AxisBar label="ax" value={packet?.ax ?? 0} max={2} color="bg-red-400" unit="g" />
+                  <AxisBar label="ay" value={packet?.ay ?? 0} max={2} color="bg-red-400" unit="g" />
+                  <AxisBar label="az" value={packet?.az ?? 0} max={2} color="bg-red-400" unit="g" />
                 </div>
               </div>
 
@@ -301,9 +310,9 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
                   </span>
                 </div>
                 <div className="space-y-2">
-                  <AxisBar label="gx" value={packet?.gx ?? 0} max={500} color="bg-blue-400" unit="°/s" />
-                  <AxisBar label="gy" value={packet?.gy ?? 0} max={500} color="bg-blue-400" unit="°/s" />
-                  <AxisBar label="gz" value={packet?.gz ?? 0} max={500} color="bg-blue-400" unit="°/s" />
+                  <AxisBar label="gx" value={packet?.gx ?? 0} max={250} color="bg-blue-400" unit="°/s" />
+                  <AxisBar label="gy" value={packet?.gy ?? 0} max={250} color="bg-blue-400" unit="°/s" />
+                  <AxisBar label="gz" value={packet?.gz ?? 0} max={250} color="bg-blue-400" unit="°/s" />
                 </div>
               </div>
 
