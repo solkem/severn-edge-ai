@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { ConnectPage } from './pages/ConnectPage';
+import { PreviewPage } from './pages/PreviewPage';
 import { CollectPage } from './pages/CollectPage';
 import { TrainPage } from './pages/TrainPage';
 import { TestPage } from './pages/TestPage';
@@ -22,6 +23,10 @@ function App() {
 
   const handleConnected = (info: DeviceInfo) => {
     setDeviceInfo(info);
+    setStage(AppStage.PREVIEW);
+  };
+
+  const handlePreviewReady = () => {
     setStage(AppStage.COLLECT);
   };
 
@@ -68,15 +73,16 @@ function App() {
               {/* Stage Progress */}
               <div className="flex items-center space-x-1 md:space-x-4 overflow-x-auto w-full md:w-auto justify-center pb-1 md:pb-0">
                 {[
+                  { stage: AppStage.PREVIEW, label: 'Preview', icon: '🔍' },
                   { stage: AppStage.COLLECT, label: 'Collect', icon: '📊' },
                   { stage: AppStage.TRAIN, label: 'Train', icon: '🧠' },
                   { stage: AppStage.TEST, label: 'Test', icon: '🎯' },
                 ].map((item, idx) => {
                   const isCurrent = stage === item.stage;
-                  const isComplete =
-                    (item.stage === AppStage.COLLECT &&
-                      (stage === AppStage.TRAIN || stage === AppStage.TEST)) ||
-                    (item.stage === AppStage.TRAIN && stage === AppStage.TEST);
+                  const stageOrder = [AppStage.PREVIEW, AppStage.COLLECT, AppStage.TRAIN, AppStage.TEST];
+                  const currentIdx = stageOrder.indexOf(stage);
+                  const itemIdx = stageOrder.indexOf(item.stage);
+                  const isComplete = itemIdx >= 0 && currentIdx > itemIdx;
                   
                   return (
                     <div key={item.stage} className="flex items-center">
@@ -107,6 +113,8 @@ function App() {
       {/* Main Content */}
       <div className={`flex-grow ${stage !== AppStage.CONNECT ? 'pt-24 pb-12' : ''}`}>
         {stage === AppStage.CONNECT && <ConnectPage onConnected={handleConnected} />}
+
+        {stage === AppStage.PREVIEW && <PreviewPage onReady={handlePreviewReady} />}
 
         {stage === AppStage.COLLECT && <CollectPage onComplete={handleCollectComplete} />}
 

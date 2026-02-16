@@ -9,6 +9,7 @@ export * from './ble';
 // ============================================================================
 export enum AppStage {
   CONNECT = 'connect',
+  PREVIEW = 'preview',
   COLLECT = 'collect',
   TRAIN = 'train',
   DEPLOY = 'deploy',
