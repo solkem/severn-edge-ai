@@ -138,16 +138,33 @@ export class TrainingService {
     const idleSamples: number[][][] = [];
     for (let i = 0; i < count; i++) {
       const sample: number[][] = [];
+
+      // Random gravity orientation so "idle" works in any board pose.
+      // We generate values directly in the normalized space expected by training.
+      const u = Math.random() * 2 - 1; // cos(theta)
+      const phi = Math.random() * Math.PI * 2;
+      const s = Math.sqrt(1 - u * u);
+      const gravityG = 0.95 + Math.random() * 0.1; // ~1g with small variation
+      const baseAx = (s * Math.cos(phi) * gravityG) / NORM_ACCEL;
+      const baseAy = (s * Math.sin(phi) * gravityG) / NORM_ACCEL;
+      const baseAz = (u * gravityG) / NORM_ACCEL;
+
+      // Small constant gyro bias to mimic hand tremor / grip noise.
+      const baseGx = ((Math.random() - 0.5) * 10.0) / NORM_GYRO;
+      const baseGy = ((Math.random() - 0.5) * 10.0) / NORM_GYRO;
+      const baseGz = ((Math.random() - 0.5) * 10.0) / NORM_GYRO;
+      const tremorPhase = Math.random() * Math.PI * 2;
+
       for (let t = 0; t < MODEL_CONFIG.WINDOW_SIZE; t++) {
-        // Simulate a still device: ~0g on X/Y, ~1g on Z (gravity), ~0 dps gyro
-        // Add small noise to make it realistic
+        // Tiny low-frequency tremor plus sensor noise.
+        const tremor = Math.sin((t / MODEL_CONFIG.WINDOW_SIZE) * Math.PI * 4 + tremorPhase);
         sample.push([
-          (Math.random() - 0.5) * 0.05 / NORM_ACCEL,   // ax ≈ 0
-          (Math.random() - 0.5) * 0.05 / NORM_ACCEL,   // ay ≈ 0
-          (1.0 + (Math.random() - 0.5) * 0.05) / NORM_ACCEL, // az ≈ 1g
-          (Math.random() - 0.5) * 5.0 / NORM_GYRO,     // gx ≈ 0
-          (Math.random() - 0.5) * 5.0 / NORM_GYRO,     // gy ≈ 0
-          (Math.random() - 0.5) * 5.0 / NORM_GYRO,     // gz ≈ 0
+          baseAx + (Math.random() - 0.5) * 0.03 + tremor * 0.004,
+          baseAy + (Math.random() - 0.5) * 0.03 + tremor * 0.004,
+          baseAz + (Math.random() - 0.5) * 0.03 + tremor * 0.004,
+          baseGx + (Math.random() - 0.5) * 0.02 + tremor * 0.003,
+          baseGy + (Math.random() - 0.5) * 0.02 + tremor * 0.003,
+          baseGz + (Math.random() - 0.5) * 0.02 + tremor * 0.003,
         ]);
       }
       idleSamples.push(sample);

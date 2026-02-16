@@ -49,7 +49,7 @@ export const COLLECTION_CONFIG = {
 export const MODEL_CONFIG = {
   WINDOW_SIZE: 100,
   NUM_AXES: 6,
-  WINDOW_STRIDE: 10, // For inference sliding window (faster test feedback)
+  WINDOW_STRIDE: 5, // For inference sliding window (~0.2s updates at 25Hz)
   EPOCHS: 50, // Default training epochs
 };
 
