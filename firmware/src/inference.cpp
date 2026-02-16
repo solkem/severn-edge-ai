@@ -18,6 +18,7 @@
 #include "inference.h"
 #include "flash_storage.h"
 #include "simple_nn.h"
+#include <math.h>
 
 // ============================================================================
 // Sliding Window Buffer
@@ -40,6 +41,57 @@ static const float NORM_GYRO = 500.0f;  // Same as web app
 // SimpleNN Instance
 // ============================================================================
 static SimpleNN neuralNetwork;
+
+// ============================================================================
+// Motion Heuristics (for stable Idle behavior in classroom use)
+// ============================================================================
+static bool equalsIgnoreCase(const char* a, const char* b) {
+    while (*a && *b) {
+        char ca = *a;
+        char cb = *b;
+        if (ca >= 'A' && ca <= 'Z') ca = (char)(ca + ('a' - 'A'));
+        if (cb >= 'A' && cb <= 'Z') cb = (char)(cb + ('a' - 'A'));
+        if (ca != cb) return false;
+        a++;
+        b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
+static int findIdleClassIndex() {
+    if (!neuralNetwork.isModelLoaded()) return -1;
+
+    uint32_t numClasses = neuralNetwork.getNumClasses();
+    for (uint32_t i = 0; i < numClasses; i++) {
+        if (equalsIgnoreCase(neuralNetwork.getLabel(i), "Idle")) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static float estimateMotionScore() {
+    if (sampleIndex < 2) return 0.0f;
+
+    float accelDeltaMean = 0.0f;
+    float gyroMean = 0.0f;
+    int count = sampleIndex - 1;
+
+    for (int i = 1; i < sampleIndex; i++) {
+        accelDeltaMean += fabsf(sampleBuffer[i][0] - sampleBuffer[i - 1][0]);
+        accelDeltaMean += fabsf(sampleBuffer[i][1] - sampleBuffer[i - 1][1]);
+        accelDeltaMean += fabsf(sampleBuffer[i][2] - sampleBuffer[i - 1][2]);
+
+        gyroMean += fabsf(sampleBuffer[i][3]);
+        gyroMean += fabsf(sampleBuffer[i][4]);
+        gyroMean += fabsf(sampleBuffer[i][5]);
+    }
+
+    accelDeltaMean /= (float)(count * 3);
+    gyroMean /= (float)(count * 3);
+
+    return accelDeltaMean + gyroMean;
+}
 
 // ============================================================================
 // SETUP
@@ -176,6 +228,23 @@ int runInference(float* confidence) {
     int prediction = neuralNetwork.predict(flatInput, probabilities);
     
     *confidence = neuralNetwork.getLastConfidence();
+
+    // If an Idle class exists and motion is very low, stabilize toward Idle.
+    // This improves still-hand behavior for younger students.
+    int idleClass = findIdleClassIndex();
+    if (idleClass >= 0) {
+        const float motionScore = estimateMotionScore();
+        const float stillThreshold = 0.0035f;
+
+        if (motionScore < stillThreshold &&
+            (prediction != idleClass || *confidence < 0.75f)) {
+            prediction = idleClass;
+            // Report a strong-but-not-perfect confidence for stillness.
+            float stillConfidence = 0.92f - (motionScore / stillThreshold) * 0.12f;
+            if (stillConfidence < 0.80f) stillConfidence = 0.80f;
+            *confidence = stillConfidence;
+        }
+    }
 
     // Print result
     DEBUG_PRINT("Prediction: ");
