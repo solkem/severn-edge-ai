@@ -4,6 +4,10 @@
  * A dedicated sensor exploration stage before data collection.
  * Students see live sensor numbers, build intuition about what
  * the 6 values mean, and complete mini-challenges before moving on.
+ *
+ * DESIGN: Challenges are STUDENT-DRIVEN. The student explores freely,
+ * observes the numbers, and clicks "Got it!" when they feel they
+ * understand. No auto-detection, no rushing.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -11,83 +15,49 @@ import { getBLEService } from '../services/bleService';
 import { SensorPacket } from '../types/ble';
 
 // ============================================================================
-// Sensor Challenges
+// Sensor Challenges — student-paced, observation-based
 // ============================================================================
 interface Challenge {
   id: string;
   title: string;
   instruction: string;
+  hint: string;
   emoji: string;
-  /** Return true if the current packet meets the challenge condition */
-  check: (packet: SensorPacket, history: SensorPacket[]) => boolean;
 }
 
 const CHALLENGES: Challenge[] = [
   {
     id: 'wave',
     title: 'Wave It',
-    instruction: 'Wave the board side to side. Watch which numbers change!',
+    instruction: 'Wave the board side to side. Which numbers change the most?',
+    hint: 'Look at the red bars (ax, ay). Do they swing when you wave?',
     emoji: '👋',
-    check: (_p, history) => {
-      if (history.length < 15) return false;
-      const recent = history.slice(-15);
-      const maxAx = Math.max(...recent.map((p) => Math.abs(p.ax)));
-      return maxAx > 1.2;
-    },
   },
   {
     id: 'still',
     title: 'Hold Still',
-    instruction: 'Hold the board perfectly still for 3 seconds. What do you notice?',
+    instruction: 'Hold the board perfectly still. What do you notice about az?',
+    hint: 'Even when still, az shows ~1.0g — that\'s gravity pulling down!',
     emoji: '🧊',
-    check: (_p, history) => {
-      if (history.length < 20) return false;
-      const recent = history.slice(-20);
-      const allStill = recent.every(
-        (p) =>
-          Math.abs(p.ax) < 0.3 &&
-          Math.abs(p.ay) < 0.3 &&
-          Math.abs(p.gx) < 30 &&
-          Math.abs(p.gy) < 30 &&
-          Math.abs(p.gz) < 30
-      );
-      return allStill;
-    },
   },
   {
     id: 'spin',
     title: 'Find gz',
-    instruction: 'Try to make ONLY the gz bar move. Spin the board like a steering wheel!',
+    instruction: 'Spin the board like a steering wheel. Which BLUE bar moves?',
+    hint: 'gz measures rotation around the vertical axis — spinning!',
     emoji: '🎡',
-    check: (_p, history) => {
-      if (history.length < 15) return false;
-      const recent = history.slice(-15);
-      const maxGz = Math.max(...recent.map((p) => Math.abs(p.gz)));
-      const maxGx = Math.max(...recent.map((p) => Math.abs(p.gx)));
-      const maxGy = Math.max(...recent.map((p) => Math.abs(p.gy)));
-      // gz should dominate
-      return maxGz > 100 && maxGz > maxGx * 2 && maxGz > maxGy * 2;
-    },
   },
   {
     id: 'flip',
     title: 'Flip It',
-    instruction: 'Slowly flip the board upside down. Which number changes the most?',
+    instruction: 'Slowly flip the board upside down. Watch az carefully!',
+    hint: 'az goes from +1.0 to -1.0 because gravity flips direction.',
     emoji: '🔄',
-    check: (_p, history) => {
-      if (history.length < 20) return false;
-      const recent = history.slice(-20);
-      // az should go from ~+1 to ~-1 (gravity flip)
-      const azValues = recent.map((p) => p.az);
-      const minAz = Math.min(...azValues);
-      const maxAz = Math.max(...azValues);
-      return maxAz - minAz > 1.5;
-    },
   },
 ];
 
 // ============================================================================
-// Axis Bar Component
+// Axis Bar Component — center-origin, shows direction
 // ============================================================================
 function AxisBar({
   label,
@@ -102,18 +72,15 @@ function AxisBar({
   color: string;
   unit: string;
 }) {
-  // Center-origin bar: negative values go left, positive go right
   const clamped = Math.max(-max, Math.min(max, value));
-  const pct = (clamped / max) * 50; // -50% to +50% range
+  const pct = (clamped / max) * 50;
   const isHigh = Math.abs(value) > max * 0.5;
 
   return (
     <div className="flex items-center gap-3">
       <span className="text-slate-400 font-mono text-sm w-7 text-right font-bold">{label}</span>
       <div className="flex-1 bg-slate-700 rounded-full h-6 overflow-hidden relative">
-        {/* Center line */}
         <div className="absolute left-1/2 top-0 bottom-0 w-px bg-slate-500 z-10" />
-        {/* Value bar — grows from center */}
         <div
           className={`${color} h-full absolute top-0 transition-all duration-75 rounded-full`}
           style={{
@@ -121,7 +88,6 @@ function AxisBar({
             width: `${Math.abs(pct)}%`,
           }}
         />
-        {/* Numeric label */}
         <div className="absolute inset-0 flex items-center justify-end pr-2 z-20">
           <span className={`text-xs font-mono font-bold ${isHigh ? 'text-white' : 'text-slate-400'}`}>
             {value >= 0 ? '+' : ''}{value.toFixed(2)}
@@ -145,24 +111,11 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
   const [packet, setPacket] = useState<SensorPacket | null>(null);
   const [completedChallenges, setCompletedChallenges] = useState<Set<string>>(new Set());
   const [activeChallengeIdx, setActiveChallengeIdx] = useState(0);
-  const [justCompleted, setJustCompleted] = useState<string | null>(null);
+  const [showHint, setShowHint] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [packetCount, setPacketCount] = useState(0);
 
-  const historyRef = useRef<SensorPacket[]>([]);
   const streamingRef = useRef(false);
-
-  // Refs for challenge state accessible inside the stream callback
-  const completedRef = useRef<Set<string>>(new Set());
-  const activeIdxRef = useRef(0);
-
-  // Keep refs in sync with state
-  useEffect(() => {
-    completedRef.current = completedChallenges;
-  }, [completedChallenges]);
-
-  useEffect(() => {
-    activeIdxRef.current = activeChallengeIdx;
-  }, [activeChallengeIdx]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -179,37 +132,8 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
       const ble = getBLEService();
 
       await ble.startSensorStream((p: SensorPacket) => {
-        // Keep rolling history (last ~3 seconds at 25 Hz)
-        historyRef.current.push(p);
-        if (historyRef.current.length > 75) {
-          historyRef.current = historyRef.current.slice(-75);
-        }
-
-        // Update display (~12 fps to keep it smooth)
-        if (historyRef.current.length % 2 === 0) {
-          setPacket({ ...p });
-        }
-
-        // Check active challenge inside the stream callback (external event)
-        const idx = activeIdxRef.current;
-        const challenge = CHALLENGES[idx];
-        if (challenge && !completedRef.current.has(challenge.id)) {
-          if (challenge.check(p, historyRef.current)) {
-            setCompletedChallenges((prev) => new Set(prev).add(challenge.id));
-            setJustCompleted(challenge.id);
-
-            // Clear celebration after 2 seconds
-            setTimeout(() => setJustCompleted(null), 2000);
-
-            // Auto-advance to next incomplete challenge
-            const nextIdx = CHALLENGES.findIndex(
-              (c, i) => i > idx && !completedRef.current.has(c.id)
-            );
-            if (nextIdx >= 0) {
-              setTimeout(() => setActiveChallengeIdx(nextIdx), 1500);
-            }
-          }
-        }
+        setPacket({ ...p });
+        setPacketCount((c) => c + 1);
       });
 
       streamingRef.current = true;
@@ -230,7 +154,25 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
     }
   }, []);
 
+  // Student manually marks a challenge as done
+  const markDone = useCallback((challengeId: string) => {
+    setCompletedChallenges((prev) => new Set(prev).add(challengeId));
+    setShowHint(false);
+
+    // Auto-advance to next incomplete challenge after a brief moment
+    setTimeout(() => {
+      const nextIdx = CHALLENGES.findIndex(
+        (c, i) => i > CHALLENGES.findIndex((ch) => ch.id === challengeId) &&
+          !completedChallenges.has(c.id) && c.id !== challengeId
+      );
+      if (nextIdx >= 0) {
+        setActiveChallengeIdx(nextIdx);
+      }
+    }, 500);
+  }, [completedChallenges]);
+
   const allDone = completedChallenges.size >= CHALLENGES.length;
+  const activeChallenge = CHALLENGES[activeChallengeIdx];
 
   return (
     <div className="p-4 max-w-5xl mx-auto">
@@ -280,9 +222,14 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
                     6 numbers, updating 25× per second — this is ALL the AI sees
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="text-xs text-emerald-400 font-bold">LIVE</span>
+                <div className="flex items-center gap-3">
+                  <div className="bg-slate-800 rounded-lg px-2 py-1 text-xs font-mono text-amber-300">
+                    Packets: {packetCount}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-xs text-emerald-400 font-bold">LIVE</span>
+                  </div>
                 </div>
               </div>
 
@@ -318,12 +265,10 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
 
               {/* Raw numbers table */}
               <div className="mt-5 pt-4 border-t border-slate-700">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs text-slate-500 font-bold uppercase tracking-wider">
-                    Raw Numbers
-                  </span>
-                </div>
-                <div className="grid grid-cols-6 gap-2 font-mono text-center text-sm">
+                <span className="text-xs text-slate-500 font-bold uppercase tracking-wider">
+                  Raw Numbers
+                </span>
+                <div className="grid grid-cols-6 gap-2 font-mono text-center text-sm mt-2">
                   {['ax', 'ay', 'az', 'gx', 'gy', 'gz'].map((label, i) => (
                     <div key={label}>
                       <div className={`text-xs font-bold mb-1 ${i < 3 ? 'text-red-400' : 'text-blue-400'}`}>
@@ -352,7 +297,7 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
             </button>
           </div>
 
-          {/* Right Column: Challenges */}
+          {/* Right Column: Challenges — student-paced */}
           <div className="space-y-4">
             <h2 className="font-bold text-slate-700 text-lg px-2">
               Sensor Challenges
@@ -364,27 +309,27 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
             {CHALLENGES.map((challenge, idx) => {
               const done = completedChallenges.has(challenge.id);
               const active = idx === activeChallengeIdx && !done;
-              const celebrating = justCompleted === challenge.id;
 
               return (
                 <div
                   key={challenge.id}
                   onClick={() => {
-                    if (!done) setActiveChallengeIdx(idx);
+                    if (!done) {
+                      setActiveChallengeIdx(idx);
+                      setShowHint(false);
+                    }
                   }}
                   className={`card p-4 transition-all duration-300 cursor-pointer ${
-                    celebrating
-                      ? 'ring-4 ring-emerald-300 bg-emerald-50 border-emerald-300 scale-105'
-                      : active
+                    active
                       ? 'ring-2 ring-primary-300 border-primary-400 shadow-lg bg-primary-50'
                       : done
-                      ? 'bg-emerald-50 border-emerald-200 opacity-80'
+                      ? 'bg-emerald-50 border-emerald-200'
                       : 'hover:border-slate-300'
                   }`}
                 >
                   <div className="flex items-start gap-3">
                     <div className="text-2xl">
-                      {celebrating ? '🎉' : done ? '✅' : challenge.emoji}
+                      {done ? '✅' : challenge.emoji}
                     </div>
                     <div className="flex-1">
                       <h3 className={`font-bold ${done ? 'text-emerald-700' : 'text-slate-800'}`}>
@@ -393,12 +338,40 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
                       <p className={`text-sm mt-1 ${
                         active ? 'text-primary-700' : done ? 'text-emerald-600' : 'text-slate-500'
                       }`}>
-                        {celebrating
-                          ? 'Nice one! You got it! 🎉'
-                          : done
-                          ? 'Completed!'
-                          : challenge.instruction}
+                        {done ? 'Completed!' : challenge.instruction}
                       </p>
+
+                      {/* Active challenge: show hint toggle and "Got it!" button */}
+                      {active && (
+                        <div className="mt-3 space-y-2">
+                          {/* Hint */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowHint(!showHint);
+                            }}
+                            className="text-xs text-primary-500 hover:text-primary-700 transition-colors"
+                          >
+                            {showHint ? '▼ Hide hint' : '▶ Need a hint?'}
+                          </button>
+                          {showHint && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+                              💡 {challenge.hint}
+                            </div>
+                          )}
+
+                          {/* "Got it!" button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              markDone(challenge.id);
+                            }}
+                            className="w-full py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl transition-colors text-sm shadow-sm"
+                          >
+                            ✓ Got it! I see what happens
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -411,7 +384,7 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
             }`}>
               <div className={`card shadow-lg ${
                 allDone
-                  ? 'bg-emerald-50 border-emerald-200 shadow-emerald-100/50 animate-bounce-slow'
+                  ? 'bg-emerald-50 border-emerald-200 shadow-emerald-100/50'
                   : 'bg-slate-50 border-slate-200'
               }`}>
                 <div className="text-center">
