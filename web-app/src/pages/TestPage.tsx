@@ -15,12 +15,34 @@ interface TestPageProps {
   onStartOver?: () => void;
 }
 
+interface TrialRecord {
+  expected: number;
+  predicted: number;
+  confidence: number;
+  correct: boolean;
+  timestamp: number;
+}
+
+const CHALLENGE_ATTEMPTS = 10;
+
 export function TestPage({ labels, trainingService, onStartOver }: TestPageProps) {
+  const displayLabels = useMemo(() => {
+    if (labels.length === 1) {
+      return [
+        ...labels,
+        { id: '__idle__', name: 'Idle', sampleCount: 0 } as GestureLabel,
+      ];
+    }
+    return labels;
+  }, [labels]);
+
   const [isRunning, setIsRunning] = useState(false);
   const [currentPrediction, setCurrentPrediction] = useState<number | null>(null);
   const [confidence, setConfidence] = useState<number>(0);
-  const [predictionHistory, setPredictionHistory] = useState<number[]>([]);
+  const [recentResults, setRecentResults] = useState<InferenceResult[]>([]);
   const [useArduinoInference, setUseArduinoInference] = useState(true);
+  const [targetIndex, setTargetIndex] = useState(0);
+  const [trialHistory, setTrialHistory] = useState<TrialRecord[]>([]);
 
   useEffect(() => {
     return () => {
@@ -30,7 +52,15 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
     };
   }, []);
 
+  useEffect(() => {
+    setTargetIndex(0);
+    setTrialHistory([]);
+  }, [displayLabels]);
+
   const startTesting = async () => {
+    setCurrentPrediction(null);
+    setConfidence(0);
+    setRecentResults([]);
     setIsRunning(true);
     const ble = getBLEService();
 
@@ -39,9 +69,7 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
       await ble.startInference((result: InferenceResult) => {
         setCurrentPrediction(result.prediction);
         setConfidence(result.confidence / 100); // Convert 0-100 to 0-1
-        
-        // Add to history
-        setPredictionHistory((prev) => [...prev.slice(-19), result.prediction]);
+        setRecentResults((prev) => [...prev.slice(-39), result]);
       });
     } else {
       // Fallback: browser-side inference (requires model not disposed)
@@ -60,7 +88,10 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
           );
           setCurrentPrediction(prediction);
           setConfidence(confidence);
-          setPredictionHistory((prev) => [...prev.slice(-19), prediction]);
+          setRecentResults((prev) => [
+            ...prev.slice(-39),
+            { prediction, confidence: Math.round(confidence * 100) },
+          ]);
           sampleBuffer.splice(0, sampleBuffer.length - MODEL_CONFIG.WINDOW_STRIDE);
         }
       });
@@ -78,15 +109,78 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
     setIsRunning(false);
   };
 
-  const predictionCounts = useMemo(() => {
-    const counts = new Array(labels.length).fill(0);
-    for (const pred of predictionHistory) {
-      if (pred >= 0 && pred < counts.length) {
-        counts[pred]++;
+  const scoreCurrentAttempt = () => {
+    if (displayLabels.length === 0 || recentResults.length === 0) {
+      return;
+    }
+
+    if (trialHistory.length >= CHALLENGE_ATTEMPTS) {
+      return;
+    }
+
+    const window = recentResults.slice(-15);
+    const counts = new Map<number, number>();
+
+    for (const result of window) {
+      counts.set(result.prediction, (counts.get(result.prediction) ?? 0) + 1);
+    }
+
+    let bestPrediction = -1;
+    let bestCount = -1;
+    for (const [pred, count] of counts.entries()) {
+      if (count > bestCount) {
+        bestPrediction = pred;
+        bestCount = count;
       }
     }
-    return counts;
-  }, [predictionHistory, labels.length]);
+
+    const inRangePrediction =
+      bestPrediction >= 0 && bestPrediction < displayLabels.length
+        ? bestPrediction
+        : -1;
+    const confidences = window
+      .filter((r) => r.prediction === bestPrediction)
+      .map((r) => r.confidence);
+    const avgConfidence =
+      confidences.length > 0
+        ? confidences.reduce((sum, value) => sum + value, 0) / confidences.length
+        : 0;
+
+    const expected = targetIndex;
+    const correct = inRangePrediction === expected;
+
+    setTrialHistory((prev) => [
+      {
+        expected,
+        predicted: inRangePrediction,
+        confidence: avgConfidence,
+        correct,
+        timestamp: Date.now(),
+      },
+      ...prev,
+    ].slice(0, 20));
+
+    setTargetIndex((prev) =>
+      displayLabels.length > 0 ? (prev + 1) % displayLabels.length : 0
+    );
+  };
+
+  const resetGuidedScores = () => {
+    setTargetIndex(0);
+    setTrialHistory([]);
+  };
+  const challengeWindow = trialHistory.slice(0, CHALLENGE_ATTEMPTS);
+  const challengeCompleted = challengeWindow.length;
+  const challengeCorrect = challengeWindow.filter((trial) => trial.correct).length;
+  const challengePct = (challengeCorrect / CHALLENGE_ATTEMPTS) * 100;
+  const challengeIsComplete = challengeCompleted >= CHALLENGE_ATTEMPTS;
+  const targetLabel = displayLabels[targetIndex]?.name ?? 'Unknown';
+  const predictedLabel =
+    currentPrediction !== null && currentPrediction >= 0 && currentPrediction < displayLabels.length
+      ? displayLabels[currentPrediction].name
+      : currentPrediction !== null
+      ? `Class ${currentPrediction}`
+      : null;
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
@@ -130,13 +224,13 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
               </div>
 
               {isRunning ? (
-                currentPrediction !== null && currentPrediction < labels.length ? (
+                predictedLabel ? (
                   <div className="relative z-10 animate-in fade-in zoom-in duration-300">
                     <div className="text-slate-400 text-sm uppercase tracking-widest mb-4 font-bold">
                       {useArduinoInference ? ' Arduino Says...' : 'Detected Gesture'}
                     </div>
                     <div className="text-6xl md:text-7xl font-bold text-white mb-4 tracking-tight">
-                      {labels[currentPrediction].name}
+                      {predictedLabel}
                     </div>
 
                     <div className="inline-flex items-center gap-2 bg-slate-800/50 rounded-full px-4 py-2 backdrop-blur-sm border border-slate-700">
@@ -158,6 +252,14 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
                         }`}
                         style={{ width: `${confidence * 100}%` }}
                       />
+                    </div>
+
+                    <div className="mt-5 text-sm text-indigo-200">
+                      Target now: <span className="font-bold text-white">{targetLabel}</span>
+                    </div>
+
+                    <div className="mt-6 w-full max-w-xl bg-slate-800/40 border border-slate-700 rounded-2xl p-4 text-slate-200 text-sm">
+                      Keep the board steady, do one clear gesture, then tap <span className="font-semibold">Score Attempt</span>.
                     </div>
                   </div>
                 ) : (
@@ -188,49 +290,78 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
           </div>
         </div>
 
-        {/* Right Column: Stats & History */}
-        <div className="space-y-6">
-          {/* Prediction History */}
-          <div className="card h-full">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <span className="text-xl"></span> Distribution
-            </h3>
-
-            {predictionHistory.length > 0 ? (
-              <div className="space-y-4">
-                {labels.map((label, idx) => {
-                  const count = predictionCounts[idx];
-                  const total = predictionHistory.length;
-                  const percentage = total > 0 ? (count / total) * 100 : 0;
-
-                  return (
-                    <div key={label.id}>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span className="font-bold text-slate-700">{label.name}</span>
-                        <span className="text-slate-500 text-xs">
-                          {count} ({percentage.toFixed(0)}%)
-                        </span>
-                      </div>
-                      <div className="bg-slate-100 rounded-full h-2 overflow-hidden">
-                        <div
-                          className="bg-primary-500 h-full transition-all duration-500"
-                          style={{ width: `${percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-                <div className="pt-4 mt-4 border-t border-slate-100 text-center text-xs text-slate-400">
-                  Based on last {predictionHistory.length} predictions
+          {/* Right Column: Challenge */}
+          <div className="space-y-6">
+            <div className="card">
+              <h3 className="font-bold text-slate-800 mb-3">Challenge (10 Turns)</h3>
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-3">
+                <div className="text-xs uppercase tracking-wider text-indigo-700 font-semibold">
+                  Do this gesture now
+                </div>
+                <div className="text-2xl font-bold text-indigo-900 mt-1">
+                  {targetLabel}
+                </div>
+                <div className="text-xs text-indigo-700 mt-2">
+                  Hold gesture for about 1 second, then tap score.
                 </div>
               </div>
-            ) : (
-              <div className="text-center text-slate-400 py-8 text-sm">
-                No predictions yet.
-                <br/>Start testing to see data!
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={scoreCurrentAttempt}
+                  disabled={!isRunning || recentResults.length === 0 || challengeIsComplete}
+                  className="btn-primary text-sm py-2 px-3 disabled:opacity-50"
+                >
+                  Score Attempt
+                </button>
+                <button
+                  onClick={() =>
+                    setTargetIndex((prev) =>
+                      displayLabels.length > 0 ? (prev + 1) % displayLabels.length : 0
+                    )
+                  }
+                  disabled={displayLabels.length === 0}
+                  className="btn-secondary text-sm py-2 px-3"
+                >
+                  Skip Target
+                </button>
               </div>
-            )}
-          </div>
+              <button
+                onClick={resetGuidedScores}
+                className="mt-2 w-full btn-secondary text-sm py-2 px-3"
+              >
+                Reset Scores
+              </button>
+
+              <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-sm text-slate-700">
+                <div className="flex justify-between">
+                  <span className="font-semibold text-indigo-800">Score</span>
+                  <span className="font-bold text-indigo-900">
+                    {challengeCorrect}/{CHALLENGE_ATTEMPTS}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Attempts completed</span>
+                  <span className="font-bold">
+                    {challengeCompleted}/{CHALLENGE_ATTEMPTS}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t border-slate-100 pt-2 mt-2">
+                  <span>Challenge accuracy</span>
+                  <span className="font-bold">{challengePct.toFixed(0)}%</span>
+                </div>
+                <div className="mt-2 h-2 rounded-full bg-indigo-100 overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-500 transition-all duration-300"
+                    style={{ width: `${(challengeCompleted / CHALLENGE_ATTEMPTS) * 100}%` }}
+                  />
+                </div>
+                <div className="mt-2 text-xs text-indigo-800">
+                  {challengeIsComplete
+                    ? 'Challenge complete. Reset scores to try again.'
+                    : 'Keep going until you finish all 10 turns.'}
+                </div>
+              </div>
+            </div>
 
           {/* Instructions */}
           {!isRunning && (
