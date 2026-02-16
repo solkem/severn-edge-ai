@@ -29,18 +29,19 @@ Ask the class: **"Is AI magic?"**
 
 Hold up the Arduino. "This tiny board is going to learn from YOU today."
 
-Shake the board, open the **"See what the AI sees"** panel on screen. The 6 bars jump around as the board moves. Key insight: **AI sees numbers, not motion.** It finds patterns in those numbers to figure out what you're doing.
+Open the app and show the **Preview page** — the 6 sensor bars jump around as the board moves. Key insight: **AI sees numbers, not motion.** It finds patterns in those numbers to figure out what you're doing.
 
 ### Live Demo (15 min)
 
 Walk through the full flow end-to-end so students see the finish line before they start:
 
 1. Connect to Arduino via Bluetooth
-2. Choose gestures on the setup screen
-3. Record a few samples (wave, shake)
-4. Train the model (watch the accuracy climb)
-5. Deploy to Arduino
-6. Test it live — wave and see the prediction appear
+2. Explore the live sensor data on the **Preview page** (the 6 numbers)
+3. Choose gestures on the Collect page
+4. Record a few samples (wave, shake)
+5. Train the model (watch the accuracy climb)
+6. Deploy to Arduino
+7. Test it live — wave and see the prediction appear
 
 Keep it fast. The goal is excitement, not explanation.
 
@@ -52,65 +53,63 @@ Keep it fast. The goal is excitement, not explanation.
 
 **Troubleshooting:** If a board doesn't appear, check USB is plugged in and try refreshing the page. If the board shows as "Arduino" instead of "SevernEdgeAI-N," unplug for 5 seconds and replug.
 
-### Explore the Sensor (5 min)
+### Explore the Sensor — Preview Page (15 min)
 
 > **📽 SLIDE 2 — "How the Sensor Captures Your Move" poster on projector**
 
-Once connected, have students open the **"See what the AI sees"** panel (click the small arrow/text on the Collect page — it's collapsed by default). This shows a live display with 6 values and color-coded bars:
+After connecting, students land on the **Preview page** — a dedicated sensor exploration screen. This is the most important teaching moment of the session: students see the raw numbers before touching any AI buttons.
 
-- **Red bars** — accelerometer (ax, ay, az) — measures all forces on the board. When it's still, that force is gravity — which tells us which way is down. Shake it, and the readings change even if the tilt doesn't.
-- **Blue bars** — gyroscope (gx, gy, gz) — measures how fast the board is rotating
+**What students see:**
 
-Have students move the Arduino and watch the numbers react:
+1. Click **"Start Seeing Numbers"** — the screen shows 6 live sensor bars updating in real time
+2. **Red bars** (ax, ay, az) — accelerometer. Measures movement and gravity.
+3. **Blue bars** (gx, gy, gz) — gyroscope. Measures rotation speed.
+4. Bars grow **from the center** — right for positive, left for negative. Students can see direction, not just size.
+5. A **raw numbers grid** at the bottom shows exact values.
 
-- "Wave it — what numbers change?"
-- "Hold it perfectly still — what do you see?"
-- "Flip it upside down — which number moved?"
-- "Rotate it forward like a seesaw — which blue bar spikes?" (gyroscope!)
+Have students move the Arduino and watch the numbers react for a minute or two before starting the challenges.
 
-We sample these values about 25 times per second — the same rate the AI model was trained on. This builds intuition that the 6 numbers are all the AI has to work with. There's no camera, no microphone — just motion numbers.
+**Key things to say while they explore:**
 
-Real devices combine accelerometer and gyroscope together so your phone, drone, or VR headset always knows its orientation.
+- "The AI has no camera, no ears — just these 6 numbers, 25 times per second"
+- "Everything you're seeing right now is ALL the information the AI gets"
+
+### Sensor Challenges — Student-Paced (10 min)
+
+The Preview page has **4 built-in challenges** in a sidebar. Each challenge has:
+
+- An instruction telling students what to try
+- A **"Need a hint?"** toggle if they're stuck
+- A **"Got it! I see what happens"** button they click when they've observed enough
+
+**Students control the pace.** There is no timer and no auto-detection. They explore until they understand, then move on.
+
+| Challenge         | What Students Do                     | What They Learn                                                     | Your Follow-Up Question                                           |
+| ----------------- | ------------------------------------ | ------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 👋 **Wave It**    | Wave the board side to side          | ax and ay bars swing — motion shows up in the accelerometer         | _"Which bar moved the most — ax or ay? Why?"_                     |
+| 🧊 **Hold Still** | Hold the board perfectly still       | az stays at +1.0 even when "nothing" is happening — that's gravity! | _"Why isn't az at zero? What force is the sensor still feeling?"_ |
+| 🎡 **Find gz**    | Spin the board like a steering wheel | gz moves alone — each axis measures a specific type of rotation     | _"What happens if you tilt instead of spin?"_                     |
+| 🔄 **Flip It**    | Slowly flip the board upside down    | az goes from +1.0 to -1.0 as gravity reverses direction             | _"Why did the bar swap sides?"_                                   |
+
+**Your role during challenges:** Circulate the room. Don't give answers — ask follow-up questions (right column above). The hints in the app give students a nudge if they're stuck. When most students have completed all 4, tell them to click **"I'm Ready! Let's Collect Data →"** to proceed.
+
+**Bonus challenge (verbal, if time allows):**
+
+> "Before you move on — try two different gestures on the sensor panel. Do a big circle, then stir a pot. Watch the numbers. Are they the same to the sensor?"
+
+Usually yes — two gestures that _look_ different to a human can look _identical_ to the sensor. This is the deepest lesson: **the AI doesn't see what you see. It sees what the sensor reports.** Students who grasp this will pick better gestures in the next phase.
 
 ### The 600 Numbers (2 min)
 
 > **📽 SLIDE 3 — "What the AI Actually Sees" poster on projector**
 
-Pause before sensor challenges. Point to the slide and say:
+Before students leave the Preview page, point to the slide and say:
 
 > "When you record a gesture, the sensor takes 25 readings per second for 4 seconds. That's 100 readings. Each reading has 6 numbers. So your entire gesture — whether it's a wave, a shake, or a spin — is just **600 numbers** to the AI. That's it. Different gestures make different patterns of 600 numbers, and the AI learns to tell those patterns apart."
 
 This is also the moment to point at the heatmap comparison at the bottom of the slide: **"See how Wave and Shake look totally different as colored grids? That's what the AI is looking at."**
 
-Don't dwell — 2 minutes max. The sensor challenges will make it concrete.
-
-### Sensor Challenges (10 min)
-
-Now that students can see the numbers, give them challenges that build intuition about _which_ numbers matter:
-
-**Challenge 1 — "Same or Different?"**
-
-> Do a slow wave, then a fast wave. Watch the panel. Can you see the difference?
-
-Kids notice: fast wave produces bigger gyro spikes. The AI _can_ tell these apart, but the difference is subtle. This sets up the "make gestures distinct" rule naturally.
-
-**Challenge 2 — "Find the Axis"**
-
-> Try to make ONLY the gz bar move. Nothing else.
-
-They'll discover spinning the board like a top isolates gz. This teaches that each axis responds to a specific type of motion — the AI has 6 independent signals, not just one blob of "movement."
-
-**Challenge 3 — "Trick Question"**
-
-> Do a big circle. Now stir a pot. Watch the numbers. Are they the same to the sensor?
-
-Usually yes — two gestures that _look_ different to a human can look _identical_ to the sensor. This is the deepest lesson: **the AI doesn't see what you see. It sees what the sensor reports.**
-
-**Challenge 4 — "Design Your Gestures"**
-
-> Before you pick your 3 gestures, test them on the sensor panel. Do they light up different bars? If two gestures make the same bars move the same way, the AI will struggle to tell them apart.
-
-This is the payoff — students now use the panel as a _design tool_ to pick gestures that are sensor-distinct, not just visually distinct. Kids who do this will get higher accuracy and perform better in The Swap Challenge.
+Don't dwell — 2 minutes max. Tell students to click **"I'm Ready!"** to move to the Collect page.
 
 ---
 
