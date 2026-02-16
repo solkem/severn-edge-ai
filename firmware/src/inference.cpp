@@ -230,19 +230,30 @@ int runInference(float* confidence) {
     *confidence = neuralNetwork.getLastConfidence();
 
     // If an Idle class exists and motion is very low, stabilize toward Idle.
-    // This improves still-hand behavior for younger students.
+    // IMPORTANT: only override a non-Idle prediction when model confidence is low,
+    // otherwise we can suppress real gestures (e.g., Shake) too aggressively.
     int idleClass = findIdleClassIndex();
     if (idleClass >= 0) {
         const float motionScore = estimateMotionScore();
-        const float stillThreshold = 0.0035f;
+        // Handheld "still" is noisier than a table-resting board.
+        const float stillThreshold = 0.010f;
+        const float lowConfidenceThreshold = 0.60f;
 
-        if (motionScore < stillThreshold &&
-            (prediction != idleClass || *confidence < 0.75f)) {
-            prediction = idleClass;
-            // Report a strong-but-not-perfect confidence for stillness.
+        if (motionScore < stillThreshold) {
+            // Confidence we report when we trust stillness.
             float stillConfidence = 0.92f - (motionScore / stillThreshold) * 0.12f;
-            if (stillConfidence < 0.80f) stillConfidence = 0.80f;
-            *confidence = stillConfidence;
+            if (stillConfidence < 0.78f) stillConfidence = 0.78f;
+
+            if (prediction == idleClass) {
+                // If model already says Idle, just stabilize confidence upward.
+                if (*confidence < stillConfidence) {
+                    *confidence = stillConfidence;
+                }
+            } else if (*confidence < lowConfidenceThreshold) {
+                // Only force Idle when non-Idle prediction is weak.
+                prediction = idleClass;
+                *confidence = stillConfidence;
+            }
         }
     }
 
