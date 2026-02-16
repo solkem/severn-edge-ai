@@ -66,6 +66,14 @@ export function parseDeviceInfo(data: DataView): DeviceInfo {
     throw new Error(`Invalid device info size: ${data.byteLength} (expected >= 20)`);
   }
 
+  const hasModel = data.byteLength >= 21 ? data.getUint8(20) === 1 : false;
+  const storedModelSize =
+    data.byteLength >= 24
+      ? (data.getUint8(21) |
+          (data.getUint8(22) << 8) |
+          (data.getUint8(23) << 16)) >>> 0
+      : 0;
+
   return {
     firmwareMajor: data.getUint8(0),
     firmwareMinor: data.getUint8(1),
@@ -76,6 +84,8 @@ export function parseDeviceInfo(data: DataView): DeviceInfo {
     uptimeSec: readUint32LE(data, 8),
     totalSamples: readUint32LE(data, 12),
     inferenceCount: readUint32LE(data, 16),
+    hasModel,
+    storedModelSize,
   };
 }
 

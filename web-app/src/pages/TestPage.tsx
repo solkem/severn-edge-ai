@@ -23,7 +23,13 @@ interface TrialRecord {
   timestamp: number;
 }
 
+interface TimedInferenceResult extends InferenceResult {
+  receivedAt: number;
+}
+
 const CHALLENGE_ATTEMPTS = 10;
+const SCORING_WINDOW_MS = 1800;
+const SCORING_FALLBACK_COUNT = 6;
 
 export function TestPage({ labels, trainingService, onStartOver }: TestPageProps) {
   const displayLabels = useMemo(() => {
@@ -39,8 +45,9 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
   const [isRunning, setIsRunning] = useState(false);
   const [currentPrediction, setCurrentPrediction] = useState<number | null>(null);
   const [confidence, setConfidence] = useState<number>(0);
-  const [recentResults, setRecentResults] = useState<InferenceResult[]>([]);
+  const [recentResults, setRecentResults] = useState<TimedInferenceResult[]>([]);
   const [useArduinoInference, setUseArduinoInference] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [targetIndex, setTargetIndex] = useState(0);
   const [trialHistory, setTrialHistory] = useState<TrialRecord[]>([]);
 
@@ -58,43 +65,70 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
   }, [displayLabels]);
 
   const startTesting = async () => {
+    setErrorMessage(null);
     setCurrentPrediction(null);
     setConfidence(0);
     setRecentResults([]);
     setIsRunning(true);
     const ble = getBLEService();
 
-    if (useArduinoInference) {
-      // Use inference running ON the Arduino!
-      await ble.startInference((result: InferenceResult) => {
-        setCurrentPrediction(result.prediction);
-        setConfidence(result.confidence / 100); // Convert 0-100 to 0-1
-        setRecentResults((prev) => [...prev.slice(-39), result]);
-      });
-    } else {
-      // Fallback: browser-side inference (requires model not disposed)
-      const { MODEL_CONFIG } = await import('../config/constants');
-      const sampleBuffer: number[][] = [];
-      
-      await ble.startSensorStream((packet) => {
-        sampleBuffer.push([
-          packet.ax, packet.ay, packet.az,
-          packet.gx, packet.gy, packet.gz,
-        ]);
-
-        if (sampleBuffer.length >= MODEL_CONFIG.WINDOW_SIZE) {
-          const { prediction, confidence } = trainingService.predict(
-            sampleBuffer.slice(-MODEL_CONFIG.WINDOW_SIZE)
+    try {
+      if (useArduinoInference) {
+        const info = await ble.getDeviceInfo();
+        if (!info.hasModel || info.storedModelSize === 0) {
+          setErrorMessage(
+            'No trained model is on the Arduino. Go back to Train and tap "Upload via Bluetooth" first.'
           );
-          setCurrentPrediction(prediction);
-          setConfidence(confidence);
+          setIsRunning(false);
+          return;
+        }
+
+        // Use inference running ON the Arduino
+        await ble.startInference((result: InferenceResult) => {
+          setCurrentPrediction(result.prediction);
+          setConfidence(result.confidence / 100); // Convert 0-100 to 0-1
           setRecentResults((prev) => [
             ...prev.slice(-39),
-            { prediction, confidence: Math.round(confidence * 100) },
+            { ...result, receivedAt: Date.now() },
           ]);
-          sampleBuffer.splice(0, sampleBuffer.length - MODEL_CONFIG.WINDOW_STRIDE);
-        }
-      });
+        });
+      } else {
+        // Fallback: browser-side inference (requires model not disposed)
+        const { MODEL_CONFIG } = await import('../config/constants');
+        const sampleBuffer: number[][] = [];
+        
+        await ble.startSensorStream((packet) => {
+          sampleBuffer.push([
+            packet.ax, packet.ay, packet.az,
+            packet.gx, packet.gy, packet.gz,
+          ]);
+
+          if (sampleBuffer.length >= MODEL_CONFIG.WINDOW_SIZE) {
+            const { prediction, confidence } = trainingService.predict(
+              sampleBuffer.slice(-MODEL_CONFIG.WINDOW_SIZE)
+            );
+            setCurrentPrediction(prediction);
+            setConfidence(confidence);
+            setRecentResults((prev) => [
+              ...prev.slice(-39),
+              {
+                prediction,
+                confidence: Math.round(confidence * 100),
+                receivedAt: Date.now(),
+              },
+            ]);
+            sampleBuffer.splice(0, sampleBuffer.length - MODEL_CONFIG.WINDOW_STRIDE);
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Failed to start testing:', error);
+      setErrorMessage(
+        useArduinoInference
+          ? 'Could not start on-device inference. Reconnect Arduino and try again.'
+          : 'Could not start browser testing.'
+      );
+      setIsRunning(false);
     }
   };
 
@@ -118,19 +152,36 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
       return;
     }
 
-    const window = recentResults.slice(-15);
-    const counts = new Map<number, number>();
+    const now = Date.now();
+    const recentWindow = recentResults.filter(
+      (result) => now - result.receivedAt <= SCORING_WINDOW_MS
+    );
+    const window =
+      recentWindow.length > 0
+        ? recentWindow
+        : recentResults.slice(-SCORING_FALLBACK_COUNT);
+    const classScores = new Map<number, { weighted: number; count: number }>();
 
     for (const result of window) {
-      counts.set(result.prediction, (counts.get(result.prediction) ?? 0) + 1);
+      const weight = Math.max(1, result.confidence / 25);
+      const prev = classScores.get(result.prediction) ?? { weighted: 0, count: 0 };
+      classScores.set(result.prediction, {
+        weighted: prev.weighted + weight,
+        count: prev.count + 1,
+      });
     }
 
     let bestPrediction = -1;
+    let bestWeighted = -1;
     let bestCount = -1;
-    for (const [pred, count] of counts.entries()) {
-      if (count > bestCount) {
+    for (const [pred, stats] of classScores.entries()) {
+      if (
+        stats.weighted > bestWeighted ||
+        (stats.weighted === bestWeighted && stats.count > bestCount)
+      ) {
         bestPrediction = pred;
-        bestCount = count;
+        bestWeighted = stats.weighted;
+        bestCount = stats.count;
       }
     }
 
@@ -287,6 +338,12 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
                 </button>
               )}
             </div>
+
+            {errorMessage && (
+              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 text-sm p-3 text-center">
+                {errorMessage}
+              </div>
+            )}
           </div>
         </div>
 
@@ -302,7 +359,7 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
                   {targetLabel}
                 </div>
                 <div className="text-xs text-indigo-700 mt-2">
-                  Hold gesture for about 1 second, then tap score.
+                  Do the gesture, wait for the big label to match, then tap Score Attempt.
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">

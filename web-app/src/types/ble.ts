@@ -44,6 +44,8 @@ export interface DeviceInfo {
   uptimeSec: number;
   totalSamples: number;
   inferenceCount: number;
+  hasModel: boolean;     // true if firmware has a trained model in storage
+  storedModelSize: number; // bytes (0 when no model)
 }
 
 // ============================================================================
