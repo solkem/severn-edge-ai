@@ -410,7 +410,7 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
                     className={`w-full py-3 rounded-xl font-bold text-lg transition-colors ${
                       allDone
                         ? 'btn-success shadow-emerald-200'
-                        : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                        : 'btn-secondary bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-700'
                     }`}
                   >
                     {allDone ? "I'm Ready! Let's Collect Data →" : 'Skip to Collect Data →'}

@@ -7,16 +7,16 @@
 // BLE Configuration
 // ============================================================================
 export const BLE_CONFIG = {
-  SERVICE_UUID: '19b10000-e8f2-537e-4f6c-d104768a1214',
-  MODE_CHAR_UUID: '19b10001-e8f2-537e-4f6c-d104768a1214',
-  SENSOR_CHAR_UUID: '19b10002-e8f2-537e-4f6c-d104768a1214',
-  INFERENCE_CHAR_UUID: '19b10003-e8f2-537e-4f6c-d104768a1214',
-  DEVICE_INFO_UUID: '19b10004-e8f2-537e-4f6c-d104768a1214',
-  CONFIG_CHAR_UUID: '19b10005-e8f2-537e-4f6c-d104768a1214',
-  MODEL_UPLOAD_UUID: '19b10006-e8f2-537e-4f6c-d104768a1214',
-  MODEL_STATUS_UUID: '19b10007-e8f2-537e-4f6c-d104768a1214',
+  SERVICE_UUID: "19b10000-e8f2-537e-4f6c-d104768a1214",
+  MODE_CHAR_UUID: "19b10001-e8f2-537e-4f6c-d104768a1214",
+  SENSOR_CHAR_UUID: "19b10002-e8f2-537e-4f6c-d104768a1214",
+  INFERENCE_CHAR_UUID: "19b10003-e8f2-537e-4f6c-d104768a1214",
+  DEVICE_INFO_UUID: "19b10004-e8f2-537e-4f6c-d104768a1214",
+  CONFIG_CHAR_UUID: "19b10005-e8f2-537e-4f6c-d104768a1214",
+  MODEL_UPLOAD_UUID: "19b10006-e8f2-537e-4f6c-d104768a1214",
+  MODEL_STATUS_UUID: "19b10007-e8f2-537e-4f6c-d104768a1214",
   // Device names are now unique per Arduino: "SevernEdgeAI-XXXX" where XXXX is hardware ID
-  DEVICE_NAME_PREFIX: 'SevernEdgeAI',
+  DEVICE_NAME_PREFIX: "SevernEdgeAI",
 } as const;
 
 // Convenience alias for BLE UUIDs
@@ -36,7 +36,7 @@ export const BLE_UUIDS = {
 // ============================================================================
 export const COLLECTION_CONFIG = {
   SAMPLE_DURATION_MS: 4000, // 4 seconds per sample
-  SAMPLES_PER_GESTURE: 10,
+  SAMPLES_PER_GESTURE: 20,
   DEFAULT_GESTURES: ['Wave', 'Shake', 'Circle'],
   MIN_GESTURES: 1,            // Allow single gesture (softmax trivial, but enables fast testing)
   MAX_GESTURES: 8,            // Matches firmware NN_MAX_CLASSES
