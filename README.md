@@ -9,6 +9,7 @@ Severn Edge AI enables 5th-grade students to collect motion data, train a neural
 ## Features
 
 - **Custom Gestures**: Students name their own gestures (2-8 classes) — not locked to presets
+- **Preview Stage**: Dedicated "What the AI sees" page with live sensor exploration challenges
 - **Live Sensor Display**: Collapsible "See what the AI sees" panel shows raw numbers during recording
 - **Friendly Device Names**: Each Arduino shows as `SevernEdgeAI-1`, `SevernEdgeAI-2`, etc. via configurable lookup table
 - **Kid-Friendly UX**: Celebratory feedback, gentle quality validation, step-by-step wizard flow
@@ -39,15 +40,16 @@ Severn Edge AI enables 5th-grade students to collect motion data, train a neural
 ## Student Workflow
 
 ```
-Connect → Choose Gestures → Record Samples → Train → Deploy → Test
+Connect → Preview Sensors → Choose Gestures → Record Samples → Train → Deploy → Test
 ```
 
 1. **Connect** — Plug in Arduino, pair via Bluetooth in Chrome
-2. **Choose Gestures** — Name 2-8 custom gestures (defaults: Wave, Shake, Circle)
-3. **Record Samples** — Perform each gesture 10+ times while the app records sensor data
-4. **Train** — Watch the neural network learn in real-time (accuracy climbs to 80%+)
-5. **Deploy** — Upload the trained model to Arduino over Bluetooth
-6. **Test** — Perform gestures and see live predictions on the Arduino
+2. **Preview Sensors** — Explore ax/ay/az and gx/gy/gz with student-paced mini challenges
+3. **Choose Gestures** — Name 1-8 custom gestures (defaults: Wave, Shake, Circle)
+4. **Record Samples** — Perform each gesture 10+ times while the app records sensor data
+5. **Train** — Train the neural network in-browser and review training accuracy
+6. **Deploy** — Upload the trained model to Arduino over Bluetooth
+7. **Test** — Perform gestures and run the 10-turn challenge
 
 ## Project Structure
 
@@ -67,6 +69,7 @@ severn-edge-ai/
 │   ├── src/
 │   │   ├── pages/
 │   │   │   ├── ConnectPage.tsx  # BLE device connection
+│   │   │   ├── PreviewPage.tsx  # Sensor exploration + mini challenges
 │   │   │   ├── CollectPage.tsx  # Gesture setup + data recording
 │   │   │   ├── TrainPage.tsx    # Model training + deployment
 │   │   │   └── TestPage.tsx     # Live inference testing
@@ -78,8 +81,12 @@ severn-edge-ai/
 │   │       └── constants.ts     # Shared constants (must match firmware)
 │   └── package.json
 └── docs/
-    ├── CLASSROOM_GUIDE.md       # 3-hour lesson plan with contest
-    └── NEURAL_NETWORK_BASICS.md # Educational NN explanation
+    ├── CLASSROOM_GUIDE.md                    # 3-hour lesson plan
+    ├── CLASSROOM_GUIDE.pdf                   # Printable teacher guide
+    ├── Severn_Edge_AI_Classroom_Slides.pptx  # Classroom projector deck
+    ├── build_slides.py                       # Rebuilds classroom slide deck
+    ├── build_classroom_guide_pdf.py          # Rebuilds classroom PDF from markdown
+    └── AI_CONTEXT.md                         # Context handoff doc for AI agents
 ```
 
 ## Quick Start
@@ -113,7 +120,7 @@ Open in **Chrome** (BLE requires Chromium). Connect to your Arduino and follow t
 | Hardware | Arduino Nano 33 BLE Sense (Rev1/Rev2) |
 | Firmware | PlatformIO + SimpleNN (hand-written inference engine) |
 | Communication | Web Bluetooth (25Hz, int16, CRC-8) |
-| Web App | React 18 + TypeScript + Vite + Tailwind CSS |
+| Web App | React 19 + TypeScript + Vite + Tailwind CSS |
 | ML Training | TensorFlow.js (in-browser) |
 | Model Format | SimpleNN (dense layers, float32 weights) |
 
@@ -146,9 +153,22 @@ Flash the same firmware to all boards — each resolves its own name at boot.
 ## Documentation
 
 - [Classroom Guide](docs/CLASSROOM_GUIDE.md) — 3-hour lesson plan with The Swap Challenge contest
+- [Classroom Guide PDF](docs/CLASSROOM_GUIDE.pdf) — Printable teacher handout
+- [Classroom Slides (PPTX)](docs/Severn_Edge_AI_Classroom_Slides.pptx) — 5-slide projector deck
 - [AI Context](docs/AI_CONTEXT.md) — Complete project context for AI agents
 - [Neural Network Basics](firmware/docs/NEURAL_NETWORK_BASICS.md) — Educational explanation for students
+- [PlatformIO Cheat Sheet PDF](docs/PlatformIO%20CLI%20Cheat%20Sheet%20%E2%80%94%20Severn%20Edge%20AI.pdf) — Classroom flashing/monitoring reference
 - [CLAUDE.md](CLAUDE.md) — AI assistant development context
+
+### Rebuild Classroom Assets
+
+```bash
+# Rebuild 5-slide classroom deck
+python3 docs/build_slides.py
+
+# Rebuild printable classroom guide PDF from markdown
+python3 docs/build_classroom_guide_pdf.py
+```
 
 ## License
 
