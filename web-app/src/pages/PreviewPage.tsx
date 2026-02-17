@@ -36,22 +36,22 @@ const CHALLENGES: Challenge[] = [
   {
     id: 'still',
     title: 'Hold Still',
-    instruction: 'Hold the board perfectly still. What do you notice about az?',
-    hint: 'Even when still, az shows ~1.0g — that\'s gravity pulling down!',
+    instruction: 'Hold the board flat and still. What do you notice about az?',
+    hint: 'Even when still, gravity is there: face-up az stays near +1.0g.',
     emoji: '🧊',
   },
   {
     id: 'spin',
     title: 'Find gz',
     instruction: 'Spin the board like a steering wheel. Which BLUE bar moves?',
-    hint: 'gz measures rotation around the vertical axis — spinning!',
+    hint: 'When held flat, spinning like a steering wheel mostly changes gz.',
     emoji: '🎡',
   },
   {
     id: 'flip',
     title: 'Flip It',
     instruction: 'Slowly flip the board upside down. Watch az carefully!',
-    hint: 'az goes from +1.0 to -1.0 because gravity flips direction.',
+    hint: 'If you start face-up, az usually goes from +1.0 to -1.0 as gravity reverses.',
     emoji: '🔄',
   },
 ];

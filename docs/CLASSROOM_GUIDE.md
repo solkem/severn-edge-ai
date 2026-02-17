@@ -87,9 +87,9 @@ The Preview page has **4 built-in challenges** in a sidebar. Each challenge has:
 | Challenge         | What Students Do                     | What They Learn                                                     | Your Follow-Up Question                                           |
 | ----------------- | ------------------------------------ | ------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | 👋 **Wave It**    | Wave the board side to side          | ax and ay bars swing — motion shows up in the accelerometer         | _"Which bar moved the most — ax or ay? Why?"_                     |
-| 🧊 **Hold Still** | Hold the board perfectly still       | az stays at +1.0 even when "nothing" is happening — that's gravity! | _"Why isn't az at zero? What force is the sensor still feeling?"_ |
-| 🎡 **Find gz**    | Spin the board like a steering wheel | gz moves alone — each axis measures a specific type of rotation     | _"What happens if you tilt instead of spin?"_                     |
-| 🔄 **Flip It**    | Slowly flip the board upside down    | az goes from +1.0 to -1.0 as gravity reverses direction             | _"Why did the bar swap sides?"_                                   |
+| 🧊 **Hold Still** | Hold the board flat and still        | Face-up, az stays near +1.0 even when "nothing" is happening — that's gravity! | _"Why isn't it zero? What force is the sensor still feeling?"_ |
+| 🎡 **Find gz**    | Spin the board like a steering wheel | When held flat, gz moves most — each axis measures a specific type of rotation | _"What happens if you tilt instead of spin?"_                     |
+| 🔄 **Flip It**    | Slowly flip the board upside down    | If you start face-up, az goes from +1.0 to -1.0 as gravity reverses direction | _"Why did the bar swap sides?"_                                   |
 
 **Your role during challenges:** Circulate the room. Don't give answers — ask follow-up questions (right column above). The hints in the app give students a nudge if they're stuck. When most students have completed all 4, tell them to click **"I'm Ready! Let's Collect Data →"** to proceed.
 
