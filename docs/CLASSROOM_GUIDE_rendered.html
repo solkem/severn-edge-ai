@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Severn Edge AI — Classroom Guide</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 16mm;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Aptos, Arial, sans-serif;
+      color: #1f2937;
+      font-size: 11pt;
+      line-height: 1.45;
+      margin: 0;
+    }
+    h1, h2, h3 {
+      color: #0f766e;
+      margin: 1.0em 0 0.4em;
+      page-break-after: avoid;
+    }
+    h1 { font-size: 24pt; }
+    h2 { font-size: 17pt; }
+    h3 { font-size: 14pt; }
+    p { margin: 0.45em 0; }
+    ul, ol { margin: 0.45em 0 0.45em 1.2em; padding: 0; }
+    li { margin: 0.2em 0; }
+    hr {
+      border: 0;
+      border-top: 1px solid #d1d5db;
+      margin: 1em 0;
+    }
+    blockquote {
+      border-left: 4px solid #14b8a6;
+      margin: 0.7em 0;
+      padding: 0.35em 0.8em;
+      background: #f0fdfa;
+    }
+    code {
+      font-family: ui-monospace, Menlo, Monaco, Consolas, monospace;
+      background: #f3f4f6;
+      padding: 0.08em 0.3em;
+      border-radius: 4px;
+      font-size: 0.95em;
+    }
+    pre {
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 0.7em;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      page-break-inside: avoid;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.7em 0;
+      page-break-inside: avoid;
+      font-size: 10pt;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 6px 7px;
+      vertical-align: top;
+    }
+    th {
+      background: #ecfeff;
+      color: #0f172a;
+      text-align: left;
+      font-weight: 700;
+    }
+    tr:nth-child(even) td {
+      background: #f8fafc;
+    }
+  </style>
+</head>
+<body>
+<h1>Severn Edge AI — Classroom Guide</h1>
+<p><strong>Duration:</strong> 3 hours <strong>Audience:</strong> 5th graders (10-11 years old) <strong>Goal:</strong> Students train and deploy their own gesture recognition AI</p>
+<hr>
+<h2>Materials Checklist</h2>
+<ul><li>[ ] Arduino Nano 33 BLE Sense (one per student) — firmware pre-flashed</li><li>[ ] USB cables (+ 3–4 spares — loose cables kill models)</li><li>[ ] Laptops with Chrome browser (BLE doesn't work in Firefox/Safari)</li><li>[ ] Web app running at https://solkem.github.io/severn-edge-ai/ (or <code>npm run dev</code> locally)</li><li>[ ] Web app <strong>pre-loaded</strong> on all laptops before class (the page is ~1 MB, slow on weak WiFi)</li><li>[ ] Number stickers on each Arduino matching its BLE name (e.g. sticker "8" → SevernEdgeAI-8)</li><li>[ ] Visual slide deck on projector (4–5 slides — see Slide Deck section at end)</li><li>[ ] This guide (printed or on your own device — students don't see this)</li></ul>
+<hr>
+<h2>Hour 1: "What Does AI Actually See?" (60 min)</h2>
+<h3>Hook (15 min)</h3>
+<blockquote><strong>📽 SLIDE 1 — Title slide on projector</strong></blockquote>
+<p>Ask the class: <strong>"Is AI magic?"</strong></p>
+<p>Hold up the Arduino. "This tiny board is going to learn from YOU today."</p>
+<p>Open the app and show the <strong>Preview page</strong> — the 6 sensor bars jump around as the board moves. Key insight: <strong>AI sees numbers, not motion.</strong> It finds patterns in those numbers to figure out what you're doing.</p>
+<h3>Live Demo (15 min)</h3>
+<p>Walk through the full flow end-to-end so students see the finish line before they start:</p>
+<ol><li>Connect to Arduino via Bluetooth</li><li>Explore the live sensor data on the <strong>Preview page</strong> (the 6 numbers)</li><li>Choose gestures on the Collect page</li><li>Record a few samples (wave, shake)</li><li>Train the model (watch the accuracy climb)</li><li>Deploy to Arduino</li><li>Test it live — wave and see the prediction appear</li></ol>
+<p>Keep it fast. The goal is excitement, not explanation.</p>
+<h3>Connect (15 min)</h3>
+<ul><li>Each student plugs in their Arduino and opens the web app in Chrome</li><li>Click Connect, find their board by matching the number sticker (e.g. "SevernEdgeAI-8")</li><li>Celebrate each successful connection — green dot appears in the top bar</li></ul>
+<p><strong>Troubleshooting:</strong> If a board doesn't appear, check USB is plugged in and try refreshing the page. If the board shows as "Arduino" instead of "SevernEdgeAI-N," unplug for 5 seconds and replug.</p>
+<h3>Explore the Sensor — Preview Page (15 min)</h3>
+<blockquote><strong>📽 SLIDE 2 — "How the Sensor Captures Your Move" poster on projector</strong></blockquote>
+<p>After connecting, students land on the <strong>Preview page</strong> — a dedicated sensor exploration screen. This is the most important teaching moment of the session: students see the raw numbers before touching any AI buttons.</p>
+<p><strong>What students see:</strong></p>
+<ol><li>Click <strong>"Start Seeing Numbers"</strong> — the screen shows 6 live sensor bars updating in real time</li><li><strong>Red bars</strong> (ax, ay, az) — accelerometer. Measures movement and gravity.</li><li><strong>Blue bars</strong> (gx, gy, gz) — gyroscope. Measures rotation speed.</li><li>Bars grow <strong>from the center</strong> — right for positive, left for negative. Students can see direction, not just size.</li><li>A <strong>raw numbers grid</strong> at the bottom shows exact values.</li></ol>
+<p>Have students move the Arduino and watch the numbers react for a minute or two before starting the challenges.</p>
+<p><strong>Key things to say while they explore:</strong></p>
+<ul><li>"The AI has no camera, no ears — just these 6 numbers, 25 times per second"</li><li>"Everything you're seeing right now is ALL the information the AI gets"</li></ul>
+<h3>Sensor Challenges — Student-Paced (10 min)</h3>
+<p>The Preview page has <strong>4 built-in challenges</strong> in a sidebar. Each challenge has:</p>
+<ul><li>An instruction telling students what to try</li><li>A <strong>"Need a hint?"</strong> toggle if they're stuck</li><li>A <strong>"Got it! I see what happens"</strong> button they click when they've observed enough</li></ul>
+<p><strong>Students control the pace.</strong> There is no timer and no auto-detection. They explore until they understand, then move on.</p>
+<table><thead><tr><th>Challenge</th><th>What Students Do</th><th>What They Learn</th><th>Your Follow-Up Question</th></tr></thead><tbody><tr><td>👋 <strong>Wave It</strong></td><td>Wave the board side to side</td><td>ax and ay bars swing — motion shows up in the accelerometer</td><td><em>"Which bar moved the most — ax or ay? Why?"</em></td></tr><tr><td>🧊 <strong>Hold Still</strong></td><td>Hold the board flat and still</td><td>Face-up, az stays near +1.0 even when "nothing" is happening — that's gravity!</td><td><em>"Why isn't it zero? What force is the sensor still feeling?"</em></td></tr><tr><td>🎡 <strong>Find gz</strong></td><td>Spin the board like a steering wheel</td><td>When held flat, gz moves most — each axis measures a specific type of rotation</td><td><em>"What happens if you tilt instead of spin?"</em></td></tr><tr><td>🔄 <strong>Flip It</strong></td><td>Slowly flip the board upside down</td><td>If you start face-up, az goes from +1.0 to -1.0 as gravity reverses direction</td><td><em>"Why did the bar swap sides?"</em></td></tr></tbody></table>
+<p><strong>Your role during challenges:</strong> Circulate the room. Don't give answers — ask follow-up questions (right column above). The hints in the app give students a nudge if they're stuck. When most students have completed all 4, tell them to click <strong>"I'm Ready! Let's Collect Data →"</strong> to proceed.</p>
+<p><strong>Bonus challenge (verbal, if time allows):</strong></p>
+<blockquote>"Before you move on — try two different gestures on the sensor panel. Do a big circle, then stir a pot. Watch the numbers. Are they the same to the sensor?"</blockquote>
+<p>Usually yes — two gestures that <em>look</em> different to a human can look <em>identical</em> to the sensor. This is the deepest lesson: <strong>the AI doesn't see what you see. It sees what the sensor reports.</strong> Students who grasp this will pick better gestures in the next phase.</p>
+<h3>The 600 Numbers (2 min)</h3>
+<blockquote><strong>📽 SLIDE 3 — "What the AI Actually Sees" poster on projector</strong></blockquote>
+<p>Before students leave the Preview page, point to the slide and say:</p>
+<blockquote>"When you record a gesture, the sensor takes 25 readings per second for 4 seconds. That's 100 readings. Each reading has 6 numbers. So your entire gesture — whether it's a wave, a shake, or a spin — is just <strong>600 numbers</strong> to the AI. That's it. Different gestures make different patterns of 600 numbers, and the AI learns to tell those patterns apart."</blockquote>
+<p>This is also the moment to point at the heatmap comparison at the bottom of the slide: <strong>"See how Wave and Shake look totally different as colored grids? That's what the AI is looking at."</strong></p>
+<p>Don't dwell — 2 minutes max. Tell students to click <strong>"I'm Ready!"</strong> to move to the Collect page.</p>
+<hr>
+<h2>Hour 2: "Teach Your AI" (60 min)</h2>
+<h3>What Makes Good Training Data? (5 min)</h3>
+<p>Show two examples side by side:</p>
+<ol><li><strong>Good data:</strong> Someone waves consistently 10 times, same speed, same motion</li><li><strong>Bad data:</strong> Someone waves differently every time, sometimes barely moves</li></ol>
+<p>Train both. Show the accuracy difference.</p>
+<p>Core lesson: <strong>Garbage in, garbage out.</strong> The AI can only learn patterns if the patterns are consistent.</p>
+<h3>Choose Gestures (10 min)</h3>
+<p>Each student picks their gestures on the setup screen. Encourage creativity:</p>
+<ul><li>"Cast a spell"</li><li>"Stir a pot"</li><li>"Swing a bat"</li><li>"Draw a star"</li><li>"Throw a ball"</li><li>"Brush your teeth"</li></ul>
+<p><strong>Rule:</strong> Gestures must be physically distinct. If two gestures feel similar (like "small wave" and "big wave"), the AI will struggle. This is a great teaching moment when it happens. Students who did the sensor challenges will already know to check the panel before committing.</p>
+<p>Students can rename the defaults, remove them, or add new ones (up to 8, minimum 1).</p>
+<blockquote><strong>ℹ️ Single-gesture note:</strong> If a student only picks 1 gesture, the app automatically adds an "Idle" class. This is normal — the AI needs at least two things to compare. "Idle" means "not doing the gesture." The student doesn't need to record samples for Idle; the app generates them automatically.</blockquote>
+<h3>Collect Training Data (25 min)</h3>
+<p>Students record 10 samples per gesture:</p>
+<ol><li>Select a gesture card</li><li>Click "Record Sample"</li><li>Perform the gesture for 4 seconds — each recording captures 100 sensor snapshots (those 600 numbers from the poster!)</li><li>Wait for the ✓ or 💪 feedback — green confetti means it was accepted</li><li>Repeat until all gestures show "DONE"</li></ol>
+<p><strong>Tip:</strong> Encourage students to keep the sensor panel open while recording. Watching the numbers helps them understand why consistent motion matters — if the bars look different every time, the AI will struggle.</p>
+<p>Walk around the room helping. Common issues:</p>
+<ul><li><strong>"It keeps rejecting my sample"</strong> — Move bigger! The quality check needs to see real motion.</li><li><strong>"My accuracy is bad"</strong> — Are your gestures different enough? Check the sensor panel. Collect more samples.</li><li><strong>"I only want to do one gesture"</strong> — That's fine! The app auto-adds "Idle" so the AI can tell the difference between your gesture and doing nothing.</li></ul>
+<h3>Train (10 min)</h3>
+<ol><li>Click "Next: Train Model"</li><li>Watch the training progress — accuracy should climb above 70–80%</li><li>Training takes about 30 seconds for 3 gestures</li></ol>
+<blockquote><strong>📽 SLIDE 3 on projector during training</strong> — While students wait, point to the poster: "Right now, the AI is looking at all your 600-number patterns and learning the difference between them. That's what training is — finding the pattern."</blockquote>
+<p><strong>If accuracy is low (below 60%):</strong> Students can click <strong>"Train More"</strong> to run additional training rounds. Each round refines the model. They can also go back and collect more samples for weak gestures.</p>
+<h3>Deploy to Arduino (10 min)</h3>
+<p>This is the moment the AI goes from the laptop to the tiny board.</p>
+<ol><li>Click <strong>"Upload via Bluetooth"</strong></li><li>A progress bar shows the upload (~10–20 seconds for a typical model)</li><li>When it says <strong>"Model deployed! ✓"</strong> — the model is now running on the Arduino</li></ol>
+<p><strong>What to expect:</strong></p>
+<ul><li>The upload sends ~78 KB of data over Bluetooth in small chunks</li><li>Progress bar should move steadily from 0% to 100%</li><li>If it stalls or shows an error, click the upload button again — it will retry</li></ul>
+<p><strong>⚠️ Important — RAM warning:</strong> The model lives in the Arduino's memory, not saved to permanent storage. <strong>If the USB cable wiggles loose or the board loses power, the model is gone</strong> and students must re-upload. Tell students: <strong>"Don't unplug your Arduino!"</strong></p>
+<hr>
+<h2>Hour 3: "The Gesture Games" (60 min)</h2>
+<h3>The 10-Turn Challenge — Warm-Up (15 min)</h3>
+<blockquote><strong>📽 SLIDE 4 — "Challenge Time! Can your AI score 7/10?" on projector</strong></blockquote>
+<p>Before the big contest, students test their own models using the <strong>built-in 10-Turn Challenge</strong> on the Test page:</p>
+<ol><li>Click <strong>"Start Testing"</strong> — the app verifies the Arduino has a model loaded</li><li>The sidebar shows <strong>"Do this gesture now: [name]"</strong> — a target gesture to perform</li><li>The student performs the gesture and watches the big prediction label</li><li>When the prediction matches, tap <strong>"Score Attempt"</strong></li><li>✓ or ✗ appears — the app scores whether the majority of recent predictions matched</li><li>Target rotates to the next gesture</li><li>After 10 turns, they get a final score (e.g. 7/10 = 70%)</li></ol>
+<p><strong>Key teaching moment:</strong> The 10-Turn Challenge accuracy is usually <strong>lower</strong> than the training accuracy. That's normal! Training accuracy is "how well did it learn the examples." Challenge accuracy is "how well does it work in the real world." This gap is called <strong>overfitting</strong> — but you don't need to use that word with 5th graders. Just say: <strong>"Training is like studying. The challenge is the real test."</strong></p>
+<p><strong>If a students score is low:</strong> They can go back, collect more samples, and re-train. The "Train More" button lets them add rounds without starting over.</p>
+<h3>Contest: The Swap Challenge (30 min)</h3>
+<p>This is the main event. It tests whether students' models actually learned real motion patterns.</p>
+<p><strong>Setup (5 min):</strong></p>
+<ul><li>Each student writes down their gesture names on a piece of paper (face down)</li><li>Students pair up with a neighbor</li></ul>
+<p><strong>Round 1 — Guess the Gestures (10 min):</strong></p>
+<ul><li>Partners swap Arduinos (keep them plugged in!)</li><li>You must figure out the other student's gestures by trying different motions and reading the predictions</li><li>You get the prediction label (e.g. "Gesture 1," "Gesture 2") but NOT the name</li><li>First student to correctly name all gestures wins the round</li></ul>
+<p><strong>Round 2 — The Stranger Test (10 min):</strong></p>
+<ul><li>Each student demonstrates their gestures live</li><li>But their partner performs them on the Arduino</li><li>Use the 10-Turn Challenge to score — how many out of 10 does the model get right?</li><li>Highest score wins</li></ul>
+<p><strong>Why this works:</strong></p>
+<ul><li>Proves the model learned real patterns, not just memorized one person's style</li><li>Physical, loud, competitive — kids love it</li><li>Teaches generalization: did your model learn "the gesture" or just "your hand"?</li></ul>
+<p><strong>Scoring:</strong></p>
+<table><thead><tr><th>Round</th><th>Points</th></tr></thead><tbody><tr><td>Swap Challenge: Guess each gesture</td><td>3 points per correct guess</td></tr><tr><td>Stranger Test: 10-Turn Challenge score</td><td>1 point per correct prediction</td></tr></tbody></table>
+<h3>Reflection (10 min)</h3>
+<p>Bring the class back together. Ask:</p>
+<ul><li><strong>"What made your model better?"</strong> (More data, distinct gestures, consistent recording)</li><li><strong>"What made it worse?"</strong> (Similar gestures, sloppy recording, not enough samples)</li><li><strong>"What surprised you?"</strong> (How fast it trained, how it sometimes gets confused, how it works without seeing you)</li><li><strong>"Could the AI learn any gesture?"</strong> (What are the limits?)</li><li><strong>"Why was the challenge score lower than the training score?"</strong> (Training is studying, the challenge is the real test)</li></ul>
+<p>Draw out the core lessons:</p>
+<ol><li><strong>Data quality matters</strong> — consistent, clean data makes better models</li><li><strong>Distinct patterns help</strong> — the AI needs to tell things apart</li><li><strong>More data helps</strong> — but only if it's good data</li><li><strong>AI isn't magic</strong> — it's pattern matching on 600 numbers</li></ol>
+<h3>Wrap-Up (5 min)</h3>
+<blockquote><strong>📽 SLIDE 5 — Closing slide on projector</strong></blockquote>
+<p>"You just trained and deployed a real neural network. That's what AI engineers do — they collect data, train models, and put them on devices. The only difference is scale. You used 30 samples and 6 sensors. A self-driving car uses millions of samples and hundreds of sensors. But the idea is exactly the same."</p>
+<hr>
+<h2>Alternative/Bonus Contest Ideas</h2>
+<h3>The Fourth Gesture Challenge</h3>
+<p>After the main contest, students add a 4th gesture and retrain:</p>
+<ul><li>Can you find a gesture that doesn't hurt accuracy?</li><li>Students compete for highest 4-class accuracy</li><li>Teaches: more classes = harder classification, class boundaries matter</li></ul>
+<h3>Fool the AI</h3>
+<p>Students try to find motions that trick another student's model into wrong predictions:</p>
+<ul><li>Most successful "fooling" wins</li><li>Teaches adversarial thinking: what confuses ML?</li><li>Example: a gesture that's halfway between two trained gestures</li></ul>
+<hr>
+<h2>Teacher Notes</h2>
+<h3>Before Class</h3>
+<ul><li>Flash firmware to all Arduinos and verify each connects via BLE</li><li>Note each board's number (e.g. SevernEdgeAI-8) and label the physical boards with stickers to match</li><li>Test the web app on the classroom laptops (<strong>Chrome only</strong> — BLE doesn't work in Firefox/Safari)</li><li>Pre-load the web app URL on all laptops (avoids 20 simultaneous 1 MB downloads on class WiFi)</li><li>Have 3–4 spare USB cables and a backup laptop in case of Bluetooth issues</li><li>Print this guide for yourself — students should never see this document</li></ul>
+<h3>Common Failure Modes</h3>
+<table><thead><tr><th>Problem</th><th>What the Student Sees</th><th>Fix</th></tr></thead><tbody><tr><td>Board not appearing in Bluetooth dialog</td><td>Empty device list</td><td>Unplug USB, wait 5 seconds, replug, refresh page</td></tr><tr><td>Board shows as "Arduino" not "SevernEdgeAI-N"</td><td>Wrong name in list</td><td>Unplug for 5 seconds, replug. The name should appear correctly.</td></tr><tr><td>Training accuracy stays low (&lt;60%)</td><td>Low percentage after training</td><td>Collect more samples, or make gestures more distinct. Use "Train More" for extra rounds.</td></tr><tr><td>Model upload fails mid-way</td><td>Progress bar stalls or error message</td><td>Check USB cable is firm (Bluetooth depends on power). Click upload again — it retries.</td></tr><tr><td>Upload shows "CRC error"</td><td>Error message on screen</td><td>The data got corrupted during transfer. Just click upload again. Works on retry.</td></tr><tr><td>"No trained model on the Arduino" on Test page</td><td>Error when starting test</td><td>Student skipped upload. Go back to Train page and click "Upload via Bluetooth."</td></tr><tr><td>Model disappeared / predictions stopped</td><td>Arduino stopped responding</td><td>USB cable wiggled loose — model lost from memory. Replug and re-upload.</td></tr><tr><td>Predictions always the same class</td><td>One gesture name stuck on screen</td><td>Model didn't learn well. Retrain with more distinct gestures and more samples.</td></tr><tr><td>Different predictions every time</td><td>Predictions flickering randomly</td><td>Gestures are too similar, or recording was inconsistent. Retrain with clearer motions.</td></tr></tbody></table>
+<h3>Key Vocabulary for Students</h3>
+<ul><li><strong>Training data</strong> — Examples you show the AI so it can learn</li><li><strong>Model</strong> — The AI's "brain" after training — really just a pattern of numbers (called weights)</li><li><strong>Inference</strong> — When the AI makes a prediction on new data</li><li><strong>Accuracy</strong> — How often the AI gets the right answer</li><li><strong>Sensor</strong> — The chip that measures motion (accelerometer + gyroscope). Students can see live sensor values in the "See what the AI sees" panel</li><li><strong>Deploy</strong> — Sending the trained model to the Arduino over Bluetooth</li><li><strong>Window</strong> — The 4-second, 600-number snapshot the AI looks at each time it makes a prediction</li></ul>
+<h3>Slide Deck Reference</h3>
+<p>The student-facing slide deck should have these slides (generate as images, minimal text):</p>
+<table><thead><tr><th>Slide</th><th>Content</th><th>When to Show</th></tr></thead><tbody><tr><td>1</td><td>Title: "Severn Edge AI" + Arduino photo + "Today you teach a robot"</td><td>Opening hook</td></tr><tr><td>2</td><td>Visual poster: "How the Sensor Captures Your Move" (6 graphs, timeline)</td><td>Explore the Sensor section</td></tr><tr><td>3</td><td>Visual poster: "What the AI Actually Sees" (600-number table + heatmaps)</td><td>The 600 Numbers section + during training wait</td></tr><tr><td>4</td><td>"Challenge Time! Can your AI score 7/10?" + challenge icon</td><td>Start of Hour 3</td></tr><tr><td>5</td><td>"You just trained a real neural network" + recap of 4 lessons</td><td>Wrap-up</td></tr></tbody></table>
+</body>
+</html>

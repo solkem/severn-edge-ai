@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PlatformIO CLI Cheat Sheet — Severn Edge AI</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+      :root {
+        --bg-primary: #0f1117;
+        --bg-secondary: #161822;
+        --bg-card: #1c1f2e;
+        --bg-code: #0d0f16;
+        --border: #2a2d3e;
+        --text-primary: #e4e6f0;
+        --text-secondary: #8b8fa8;
+        --text-muted: #5c6078;
+        --accent-orange: #f97316;
+        --accent-blue: #3b82f6;
+        --accent-green: #22c55e;
+        --accent-purple: #a855f7;
+        --accent-cyan: #06b6d4;
+        --accent-pink: #ec4899;
+        --accent-yellow: #eab308;
+        --accent-red: #ef4444;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          "Inter",
+          -apple-system,
+          BlinkMacSystemFont,
+          sans-serif;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        line-height: 1.5;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      @page {
+        size: A4;
+        margin: 0;
+      }
+
+      .page {
+        width: 210mm;
+        min-height: 297mm;
+        margin: 0 auto;
+        padding: 20mm 16mm;
+        background: var(--bg-primary);
+        position: relative;
+        overflow: hidden;
+        page-break-after: always;
+      }
+
+      .page::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(
+          90deg,
+          var(--accent-orange),
+          var(--accent-purple),
+          var(--accent-cyan)
+        );
+      }
+
+      /* Header */
+      .header {
+        text-align: center;
+        margin-bottom: 18px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .header-badge {
+        display: inline-block;
+        background: linear-gradient(135deg, var(--accent-orange), #ea580c);
+        color: #fff;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        padding: 3px 12px;
+        border-radius: 20px;
+        margin-bottom: 8px;
+      }
+
+      .header h1 {
+        font-size: 28px;
+        font-weight: 900;
+        letter-spacing: -0.5px;
+        background: linear-gradient(135deg, #fff, #c4c8e0);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin-bottom: 4px;
+      }
+
+      .header p {
+        font-size: 11px;
+        color: var(--text-secondary);
+        font-weight: 400;
+      }
+
+      /* Grid */
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .grid .full-width {
+        grid-column: 1 / -1;
+      }
+
+      /* Cards */
+      .card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .card::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+      }
+
+      .card.orange::before {
+        background: linear-gradient(90deg, var(--accent-orange), transparent);
+      }
+      .card.blue::before {
+        background: linear-gradient(90deg, var(--accent-blue), transparent);
+      }
+      .card.green::before {
+        background: linear-gradient(90deg, var(--accent-green), transparent);
+      }
+      .card.purple::before {
+        background: linear-gradient(90deg, var(--accent-purple), transparent);
+      }
+      .card.cyan::before {
+        background: linear-gradient(90deg, var(--accent-cyan), transparent);
+      }
+      .card.pink::before {
+        background: linear-gradient(90deg, var(--accent-pink), transparent);
+      }
+      .card.yellow::before {
+        background: linear-gradient(90deg, var(--accent-yellow), transparent);
+      }
+      .card.red::before {
+        background: linear-gradient(90deg, var(--accent-red), transparent);
+      }
+
+      .card-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .card.orange .card-title {
+        color: var(--accent-orange);
+      }
+      .card.blue .card-title {
+        color: var(--accent-blue);
+      }
+      .card.green .card-title {
+        color: var(--accent-green);
+      }
+      .card.purple .card-title {
+        color: var(--accent-purple);
+      }
+      .card.cyan .card-title {
+        color: var(--accent-cyan);
+      }
+      .card.pink .card-title {
+        color: var(--accent-pink);
+      }
+      .card.yellow .card-title {
+        color: var(--accent-yellow);
+      }
+      .card.red .card-title {
+        color: var(--accent-red);
+      }
+
+      .card-icon {
+        font-size: 16px;
+      }
+
+      /* Command rows */
+      .cmd-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 5px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        gap: 8px;
+      }
+
+      .cmd-row:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+
+      .cmd-row:first-of-type {
+        padding-top: 0;
+      }
+
+      .cmd-code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        font-weight: 500;
+        color: var(--accent-cyan);
+        background: var(--bg-code);
+        padding: 3px 7px;
+        border-radius: 5px;
+        border: 1px solid rgba(6, 182, 212, 0.15);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      .cmd-desc {
+        font-size: 10px;
+        color: var(--text-secondary);
+        text-align: right;
+        line-height: 1.4;
+        flex-shrink: 1;
+      }
+
+      /* Flags table */
+      .flag-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      }
+
+      .flag-row:last-child {
+        border-bottom: none;
+      }
+
+      .flag-code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        font-weight: 500;
+        color: var(--accent-yellow);
+        background: var(--bg-code);
+        padding: 2px 6px;
+        border-radius: 4px;
+        border: 1px solid rgba(234, 179, 8, 0.15);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      .flag-desc {
+        font-size: 9.5px;
+        color: var(--text-secondary);
+        line-height: 1.4;
+      }
+
+      /* Pro tips */
+      .tip {
+        background: rgba(168, 85, 247, 0.08);
+        border: 1px solid rgba(168, 85, 247, 0.2);
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-top: 6px;
+      }
+
+      .tip-label {
+        font-size: 8px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--accent-purple);
+        margin-bottom: 3px;
+      }
+
+      .tip-text {
+        font-size: 9.5px;
+        color: var(--text-secondary);
+        line-height: 1.4;
+      }
+
+      .tip-text code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9px;
+        color: var(--accent-cyan);
+        background: var(--bg-code);
+        padding: 1px 4px;
+        border-radius: 3px;
+      }
+
+      /* Footer */
+      .footer {
+        text-align: center;
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid var(--border);
+      }
+
+      .footer p {
+        font-size: 9px;
+        color: var(--text-muted);
+      }
+
+      .footer .brand {
+        font-weight: 700;
+        color: var(--accent-orange);
+      }
+
+      /* INI example block */
+      .ini-block {
+        background: var(--bg-code);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px;
+        line-height: 1.6;
+        color: var(--text-secondary);
+        margin-top: 6px;
+      }
+
+      .ini-block .comment {
+        color: var(--text-muted);
+      }
+      .ini-block .section {
+        color: var(--accent-orange);
+        font-weight: 600;
+      }
+      .ini-block .key {
+        color: var(--accent-cyan);
+      }
+      .ini-block .value {
+        color: var(--accent-green);
+      }
+
+      /* Responsive screen view */
+      @media screen {
+        body {
+          padding: 20px;
+          background: #0a0b10;
+        }
+        .page {
+          box-shadow: 0 0 60px rgba(0, 0, 0, 0.5);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ============ PAGE 1 ============ -->
+    <div class="page">
+      <div class="header">
+        <div class="header-badge">Quick Reference</div>
+        <h1>PlatformIO CLI Cheat Sheet</h1>
+        <p>Essential commands for embedded development • PlatformIO Core 6.x</p>
+      </div>
+
+      <div class="grid">
+        <!-- Project Setup -->
+        <div class="card orange">
+          <div class="card-title">
+            <span class="card-icon">🚀</span> Project Setup
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio project init</span>
+            <span class="cmd-desc">Init project in current dir</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio project init --board esp32dev</span>
+            <span class="cmd-desc">Init with specific board</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio project init --ide vscode</span>
+            <span class="cmd-desc">Init with IDE integration</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio project config</span>
+            <span class="cmd-desc">Show project config</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio project metadata</span>
+            <span class="cmd-desc">Dump project metadata</span>
+          </div>
+        </div>
+
+        <!-- Build & Upload -->
+        <div class="card green">
+          <div class="card-title">
+            <span class="card-icon">🔨</span> Build & Upload
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio run</span>
+            <span class="cmd-desc">Build all environments</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio run -e esp32dev</span>
+            <span class="cmd-desc">Build specific environment</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio run -t upload</span>
+            <span class="cmd-desc">Build + upload firmware</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio run -t clean</span>
+            <span class="cmd-desc">Clean build files</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio run -t uploadfs</span>
+            <span class="cmd-desc">Upload filesystem image</span>
+          </div>
+        </div>
+
+        <!-- Serial Monitor -->
+        <div class="card cyan">
+          <div class="card-title">
+            <span class="card-icon">📡</span> Serial Monitor
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio device monitor</span>
+            <span class="cmd-desc">Open serial monitor</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio device monitor -b 115200</span>
+            <span class="cmd-desc">Set baud rate</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio device monitor -p /dev/cu.usb*</span>
+            <span class="cmd-desc">Specify port (macOS)</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio device monitor --filter log2file</span>
+            <span class="cmd-desc">Log output to file</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio device list</span>
+            <span class="cmd-desc">List connected devices</span>
+          </div>
+        </div>
+
+        <!-- Library Management -->
+        <div class="card purple">
+          <div class="card-title">
+            <span class="card-icon">📦</span> Library Management
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio lib install "WiFi"</span>
+            <span class="cmd-desc">Install library by name</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio lib install 13</span>
+            <span class="cmd-desc">Install by registry ID</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio lib uninstall "WiFi"</span>
+            <span class="cmd-desc">Remove a library</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio lib update</span>
+            <span class="cmd-desc">Update all libraries</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio lib search "sensor"</span>
+            <span class="cmd-desc">Search library registry</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio lib list</span>
+            <span class="cmd-desc">List installed libs</span>
+          </div>
+        </div>
+
+        <!-- Board Management -->
+        <div class="card blue">
+          <div class="card-title">
+            <span class="card-icon">🔌</span> Boards & Platforms
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio boards</span>
+            <span class="cmd-desc">List all supported boards</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio boards "esp32"</span>
+            <span class="cmd-desc">Search for boards</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio platform list</span>
+            <span class="cmd-desc">List installed platforms</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio platform install espressif32</span>
+            <span class="cmd-desc">Install a platform</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio platform update</span>
+            <span class="cmd-desc">Update all platforms</span>
+          </div>
+        </div>
+
+        <!-- Debugging -->
+        <div class="card red">
+          <div class="card-title">
+            <span class="card-icon">🐛</span> Debugging & Testing
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio debug</span>
+            <span class="cmd-desc">Start debugger</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio test</span>
+            <span class="cmd-desc">Run unit tests</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio test -e native</span>
+            <span class="cmd-desc">Run tests on native</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio check</span>
+            <span class="cmd-desc">Static code analysis</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio run -v</span>
+            <span class="cmd-desc">Verbose build output</span>
+          </div>
+        </div>
+
+        <!-- platformio.ini Example — Full Width -->
+        <div class="card yellow full-width">
+          <div class="card-title">
+            <span class="card-icon">⚙️</span> platformio.ini — Configuration
+            Example
+          </div>
+          <div class="ini-block">
+            <span class="comment">; Common settings for all environments</span
+            ><br />
+            <span class="section">[platformio]</span><br />
+            <span class="key">default_envs</span> =
+            <span class="value">esp32dev</span><br /><br />
+            <span class="section">[env:esp32dev]</span><br />
+            <span class="key">platform</span> =
+            <span class="value">espressif32</span><br />
+            <span class="key">board</span> = <span class="value">esp32dev</span
+            ><br />
+            <span class="key">framework</span> =
+            <span class="value">arduino</span><br />
+            <span class="key">monitor_speed</span> =
+            <span class="value">115200</span><br />
+            <span class="key">lib_deps</span> =<br />
+            &nbsp;&nbsp;&nbsp;&nbsp;<span class="value"
+              >adafruit/Adafruit NeoPixel@^1.12</span
+            ><br />
+            &nbsp;&nbsp;&nbsp;&nbsp;<span class="value"
+              >bblanchon/ArduinoJson@^7.0</span
+            ><br />
+            <span class="key">build_flags</span> =
+            <span class="value">-DCORE_DEBUG_LEVEL=3</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <p>
+          <span class="brand">Severn Edge AI</span> • PlatformIO CLI v6.x •
+          Generated Feb 2026
+        </p>
+      </div>
+    </div>
+
+    <!-- ============ PAGE 2 ============ -->
+    <div class="page">
+      <div class="header">
+        <div class="header-badge">Page 2</div>
+        <h1>PlatformIO CLI Cheat Sheet</h1>
+        <p>Advanced commands, flags, and workflow tips</p>
+      </div>
+
+      <div class="grid">
+        <!-- System & Updates -->
+        <div class="card orange">
+          <div class="card-title">
+            <span class="card-icon">🔄</span> System & Updates
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio --version</span>
+            <span class="cmd-desc">Show PlatformIO version</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio upgrade</span>
+            <span class="cmd-desc">Upgrade PlatformIO Core</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio system info</span>
+            <span class="cmd-desc">System environment info</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio system prune</span>
+            <span class="cmd-desc">Remove unused data</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio settings get</span>
+            <span class="cmd-desc">Show all settings</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code"
+              >pio settings set auto_update_libraries No</span
+            >
+            <span class="cmd-desc">Disable auto-update</span>
+          </div>
+        </div>
+
+        <!-- Remote Development -->
+        <div class="card pink">
+          <div class="card-title">
+            <span class="card-icon">🌐</span> Remote Development
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio remote agent start</span>
+            <span class="cmd-desc">Start remote agent</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio remote run -t upload</span>
+            <span class="cmd-desc">Upload to remote device</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio remote device monitor</span>
+            <span class="cmd-desc">Monitor remote serial</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">pio remote device list</span>
+            <span class="cmd-desc">List remote devices</span>
+          </div>
+        </div>
+
+        <!-- Useful Flags -->
+        <div class="card green">
+          <div class="card-title">
+            <span class="card-icon">🏁</span> Useful Flags
+          </div>
+          <div class="flag-row">
+            <span class="flag-code">-e &lt;env&gt;</span>
+            <span class="flag-desc">Target specific environment</span>
+          </div>
+          <div class="flag-row">
+            <span class="flag-code">-d &lt;dir&gt;</span>
+            <span class="flag-desc">Specify project directory</span>
+          </div>
+          <div class="flag-row">
+            <span class="flag-code">-v</span>
+            <span class="flag-desc">Verbose output</span>
+          </div>
+          <div class="flag-row">
+            <span class="flag-code">-t &lt;target&gt;</span>
+            <span class="flag-desc">Run specific target</span>
+          </div>
+          <div class="flag-row">
+            <span class="flag-code">--upload-port &lt;port&gt;</span>
+            <span class="flag-desc">Specify upload port</span>
+          </div>
+          <div class="flag-row">
+            <span class="flag-code">-j &lt;N&gt;</span>
+            <span class="flag-desc">Parallel build jobs</span>
+          </div>
+          <div class="flag-row">
+            <span class="flag-code">--no-ansi</span>
+            <span class="flag-desc">Disable colored output</span>
+          </div>
+        </div>
+
+        <!-- Common Build Targets -->
+        <div class="card cyan">
+          <div class="card-title">
+            <span class="card-icon">🎯</span> Build Targets (-t)
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">upload</span>
+            <span class="cmd-desc">Build & flash firmware</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">clean</span>
+            <span class="cmd-desc">Clean build artifacts</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">uploadfs</span>
+            <span class="cmd-desc">Upload SPIFFS/LittleFS</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">erase</span>
+            <span class="cmd-desc">Erase flash memory</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">size</span>
+            <span class="cmd-desc">Show firmware size</span>
+          </div>
+          <div class="cmd-row">
+            <span class="cmd-code">monitor</span>
+            <span class="cmd-desc">Build + upload + monitor</span>
+          </div>
+        </div>
+
+        <!-- Common platformio.ini options — Full Width -->
+        <div class="card purple full-width">
+          <div class="card-title">
+            <span class="card-icon">📝</span> Common platformio.ini Options
+          </div>
+          <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 0 20px">
+            <div>
+              <div class="flag-row">
+                <span class="flag-code">platform</span>
+                <span class="flag-desc"
+                  >Dev platform (espressif32, atmelavr…)</span
+                >
+              </div>
+              <div class="flag-row">
+                <span class="flag-code">board</span>
+                <span class="flag-desc">Target board ID</span>
+              </div>
+              <div class="flag-row">
+                <span class="flag-code">framework</span>
+                <span class="flag-desc">arduino, espidf, mbed…</span>
+              </div>
+              <div class="flag-row">
+                <span class="flag-code">lib_deps</span>
+                <span class="flag-desc">Library dependencies</span>
+              </div>
+              <div class="flag-row">
+                <span class="flag-code">build_flags</span>
+                <span class="flag-desc">Compiler defines & flags</span>
+              </div>
+            </div>
+            <div>
+              <div class="flag-row">
+                <span class="flag-code">monitor_speed</span>
+                <span class="flag-desc">Serial baud rate</span>
+              </div>
+              <div class="flag-row">
+                <span class="flag-code">upload_port</span>
+                <span class="flag-desc">USB port for uploading</span>
+              </div>
+              <div class="flag-row">
+                <span class="flag-code">upload_speed</span>
+                <span class="flag-desc">Upload baud rate</span>
+              </div>
+              <div class="flag-row">
+                <span class="flag-code">board_build.partitions</span>
+                <span class="flag-desc">Custom partition table</span>
+              </div>
+              <div class="flag-row">
+                <span class="flag-code">build_src_filter</span>
+                <span class="flag-desc">Include/exclude src files</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Workflow Tips — Full Width -->
+        <div class="card blue full-width">
+          <div class="card-title">
+            <span class="card-icon">⚡</span> Common Workflows
+          </div>
+          <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 10px">
+            <div class="tip">
+              <div class="tip-label">🔁 Build + Upload + Monitor</div>
+              <div class="tip-text">
+                <code>pio run -t upload && pio device monitor</code><br />
+                Or use: <code>pio run -t upload -t monitor</code>
+              </div>
+            </div>
+            <div class="tip">
+              <div class="tip-label">🧹 Full Clean Rebuild</div>
+              <div class="tip-text">
+                <code>pio run -t clean && pio run</code><br />
+                Useful when builds are acting strange
+              </div>
+            </div>
+            <div class="tip">
+              <div class="tip-label">📋 Check Flash Usage</div>
+              <div class="tip-text">
+                <code>pio run -t size</code><br />
+                Shows RAM and Flash usage breakdown
+              </div>
+            </div>
+            <div class="tip">
+              <div class="tip-label">🔍 Find Your Board ID</div>
+              <div class="tip-text">
+                <code>pio boards "nano"</code><br />
+                Search by name, MCU, or framework
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Keyboard Shortcuts for Serial Monitor -->
+        <div class="card yellow full-width">
+          <div class="card-title">
+            <span class="card-icon">⌨️</span> Serial Monitor Shortcuts
+          </div>
+          <div
+            class="grid"
+            style="grid-template-columns: 1fr 1fr 1fr; gap: 0 16px"
+          >
+            <div class="flag-row">
+              <span class="flag-code">Ctrl+]</span>
+              <span class="flag-desc">Quit monitor</span>
+            </div>
+            <div class="flag-row">
+              <span class="flag-code">Ctrl+T</span>
+              <span class="flag-desc">Menu / command mode</span>
+            </div>
+            <div class="flag-row">
+              <span class="flag-code">Ctrl+T → Ctrl+H</span>
+              <span class="flag-desc">Show help</span>
+            </div>
+            <div class="flag-row">
+              <span class="flag-code">Ctrl+T → Ctrl+D</span>
+              <span class="flag-desc">Toggle DTR</span>
+            </div>
+            <div class="flag-row">
+              <span class="flag-code">Ctrl+T → Ctrl+R</span>
+              <span class="flag-desc">Toggle RTS</span>
+            </div>
+            <div class="flag-row">
+              <span class="flag-code">Ctrl+T → Ctrl+P</span>
+              <span class="flag-desc">Change port</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <p>
+          <span class="brand">Severn Edge AI</span> • PlatformIO CLI v6.x •
+          Generated Feb 2026 • docs.platformio.org
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
