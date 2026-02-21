@@ -117,7 +117,7 @@ function App() {
   };
 
   const handleOpenPortfolio = () => {
-    goToStage(AppStage.PORTFOLIO);
+    requestGate('gate-4-edge-ai', AppStage.PORTFOLIO);
   };
 
   const handleStartOver = () => {

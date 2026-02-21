@@ -154,6 +154,7 @@ Flash the same firmware to all boards — each resolves its own name at boot.
 
 - [Classroom Guide](docs/CLASSROOM_GUIDE.md) — 3-hour lesson plan with The Swap Challenge contest
 - [Classroom Guide PDF](docs/CLASSROOM_GUIDE.pdf) — Printable teacher handout
+- [Student Handout](docs/STUDENT_HANDOUT.md) — One-page student worksheet (Preview/Train/Test first, full brief at end)
 - [Classroom Slides (PPTX)](docs/Severn_Edge_AI_Classroom_Slides.pptx) — 5-slide projector deck
 - [AI Context](docs/AI_CONTEXT.md) — Complete project context for AI agents
 - [Neural Network Basics](firmware/docs/NEURAL_NETWORK_BASICS.md) — Educational explanation for students

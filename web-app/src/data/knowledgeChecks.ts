@@ -46,5 +46,15 @@ export const KNOWLEDGE_CHECKS: Record<CheckpointId, KnowledgeCheck> = {
     explanation:
       'Low confidence often means your training data overlaps too much or your live gesture does not match training examples.',
   },
+  'gate-4-edge-ai': {
+    id: 'gate-4-edge-ai',
+    question: 'What makes this an Edge AI project?',
+    options: [
+      { text: 'The model runs on the Arduino device', correct: true },
+      { text: 'All predictions happen only in the cloud', correct: false },
+      { text: 'It works only when Wi-Fi is strong', correct: false },
+    ],
+    explanation:
+      'Edge AI means inference runs on the device itself, close to the sensor input.',
+  },
 };
-

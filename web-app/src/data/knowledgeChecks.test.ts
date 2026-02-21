@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { KNOWLEDGE_CHECKS } from './knowledgeChecks';
 
 describe('knowledgeChecks', () => {
-  it('defines the required three gates', () => {
+  it('defines the required four gates', () => {
     expect(Object.keys(KNOWLEDGE_CHECKS).sort()).toEqual([
       'gate-1-sensor',
       'gate-2-gesture',
       'gate-3-confidence',
+      'gate-4-edge-ai',
     ]);
   });
 

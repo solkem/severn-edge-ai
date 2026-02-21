@@ -12,7 +12,8 @@ export type BadgeId =
 export type CheckpointId =
   | 'gate-1-sensor'
   | 'gate-2-gesture'
-  | 'gate-3-confidence';
+  | 'gate-3-confidence'
+  | 'gate-4-edge-ai';
 
 export interface ProjectBrief {
   studentName: string;
@@ -56,4 +57,3 @@ export interface SessionBundle {
   samples: Sample[];
   journal: DesignJournalEntry[];
 }
-
