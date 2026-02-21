@@ -1,54 +1,145 @@
 /**
  * Severn Edge AI - Main Application
- * Student workflow: Connect → Collect → Train → Test
+ * Student workflow: Connect -> Project Brief -> Preview -> Collect -> Train -> Test -> Portfolio
  */
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ConnectPage } from './pages/ConnectPage';
+import { ProjectBriefPage } from './pages/ProjectBriefPage';
 import { PreviewPage } from './pages/PreviewPage';
 import { CollectPage } from './pages/CollectPage';
 import { TrainPage } from './pages/TrainPage';
 import { TestPage } from './pages/TestPage';
+import { PortfolioPage } from './pages/PortfolioPage';
 import type { DeviceInfo } from './types/ble';
-import type { Sample, GestureLabel } from './types';
+import type { Sample, GestureLabel, AppStage as AppStageType } from './types';
 import { AppStage } from './types';
 import { TrainingService } from './services/trainingService';
+import { useSessionStore } from './state/sessionStore';
+import { useConnectionStore } from './state/connectionStore';
+import { ConnectionStatusPill } from './components/ConnectionStatusPill';
+import { ReconnectModal } from './components/ReconnectModal';
+import { SessionRecoveryBanner } from './components/SessionRecoveryBanner';
+import { BadgeToast } from './components/BadgeToast';
+import { BadgeTray } from './components/BadgeTray';
+import { KnowledgeCheckModal } from './components/KnowledgeCheckModal';
+import { KNOWLEDGE_CHECKS } from './data/knowledgeChecks';
+import type { CheckpointId } from './storage/schema';
 
 function App() {
-  const [stage, setStage] = useState<AppStage>(AppStage.CONNECT);
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
-  const [samples, setSamples] = useState<Sample[]>([]);
-  const [labels, setLabels] = useState<GestureLabel[]>([]);
   const [trainingService, setTrainingService] = useState<TrainingService | null>(null);
+  const [activeCheckId, setActiveCheckId] = useState<CheckpointId | null>(null);
+  const [pendingStage, setPendingStage] = useState<AppStageType | null>(null);
+
+  const initializeSession = useSessionStore((state) => state.initialize);
+  const session = useSessionStore((state) => state.session);
+  const samples: Sample[] = useSessionStore((state) => state.samples);
+  const setSessionStage = useSessionStore((state) => state.setStage);
+  const setSessionDeviceName = useSessionStore((state) => state.setDeviceName);
+  const setSessionGestures = useSessionStore((state) => state.setGestures);
+  const setSessionSamples = useSessionStore((state) => state.setSamples);
+  const addBadge = useSessionStore((state) => state.addBadge);
+  const clearAwardedBadge = useSessionStore((state) => state.clearAwardedBadge);
+  const startFresh = useSessionStore((state) => state.startFresh);
+  const lastAwardedBadge = useSessionStore((state) => state.lastAwardedBadge);
+
+  const connectSuccess = useConnectionStore((state) => state.connectSuccess);
+  const labels: GestureLabel[] = session?.gestures ?? [];
+  const persistedStage = session?.currentStage ?? AppStage.CONNECT;
+  const stage = useMemo(() => {
+    if (
+      (persistedStage === AppStage.TEST || persistedStage === AppStage.PORTFOLIO) &&
+      !trainingService
+    ) {
+      return AppStage.TRAIN;
+    }
+    return persistedStage;
+  }, [persistedStage, trainingService]);
+
+  useEffect(() => {
+    void initializeSession();
+  }, [initializeSession]);
+
+  const goToStage = (nextStage: AppStageType) => {
+    setSessionStage(nextStage);
+  };
+
+  const requestGate = (checkId: CheckpointId, nextStage: AppStageType) => {
+    const passed = session?.checkpointIds.includes(checkId);
+    if (passed) {
+      goToStage(nextStage);
+      return;
+    }
+    setPendingStage(nextStage);
+    setActiveCheckId(checkId);
+  };
 
   const handleConnected = (info: DeviceInfo) => {
     setDeviceInfo(info);
-    setStage(AppStage.PREVIEW);
+    setSessionDeviceName(info ? `${info.firmwareMajor}.${info.firmwareMinor}` : null);
+    addBadge('connected');
+    goToStage(AppStage.PROJECT_BRIEF);
+    connectSuccess(info ? 'Arduino' : null);
+  };
+
+  const handleProjectBriefComplete = () => {
+    goToStage(AppStage.PREVIEW);
   };
 
   const handlePreviewReady = () => {
-    setStage(AppStage.COLLECT);
+    requestGate('gate-1-sensor', AppStage.COLLECT);
   };
 
   const handleCollectComplete = (collectedSamples: Sample[], collectedLabels: GestureLabel[]) => {
-    setSamples(collectedSamples);
-    setLabels(collectedLabels);
-    setStage(AppStage.TRAIN);
+    setSessionGestures(collectedLabels);
+    void setSessionSamples(collectedSamples);
+    if (
+      collectedLabels.length > 0 &&
+      collectedLabels.every((l) => l.sampleCount >= 10)
+    ) {
+      addBadge('data-scientist');
+    }
+    requestGate('gate-2-gesture', AppStage.TRAIN);
   };
 
   const handleTrainComplete = (service: TrainingService) => {
     setTrainingService(service);
-    setStage(AppStage.TEST);
+    requestGate('gate-3-confidence', AppStage.TEST);
+  };
+
+  const handleGatePass = () => {
+    if (pendingStage) {
+      goToStage(pendingStage);
+    }
+    setActiveCheckId(null);
+    setPendingStage(null);
+  };
+
+  const handleOpenPortfolio = () => {
+    goToStage(AppStage.PORTFOLIO);
   };
 
   const handleStartOver = () => {
-    // Reset all state and go back to connect page
-    setStage(AppStage.CONNECT);
+    setSessionStage(AppStage.CONNECT);
+    void startFresh();
     setDeviceInfo(null);
-    setSamples([]);
-    setLabels([]);
     setTrainingService(null);
+    setActiveCheckId(null);
+    setPendingStage(null);
   };
+
+  const stageOrder = useMemo(
+    () => [
+      AppStage.PROJECT_BRIEF,
+      AppStage.PREVIEW,
+      AppStage.COLLECT,
+      AppStage.TRAIN,
+      AppStage.TEST,
+      AppStage.PORTFOLIO,
+    ],
+    [],
+  );
 
   return (
     <div className="app min-h-screen flex flex-col">
@@ -73,13 +164,14 @@ function App() {
               {/* Stage Progress */}
               <div className="flex items-center space-x-1 md:space-x-4 overflow-x-auto w-full md:w-auto justify-center pb-1 md:pb-0">
                 {[
+                  { stage: AppStage.PROJECT_BRIEF, label: 'Project', icon: '📋' },
                   { stage: AppStage.PREVIEW, label: 'Preview', icon: '🔍' },
                   { stage: AppStage.COLLECT, label: 'Collect', icon: '📊' },
                   { stage: AppStage.TRAIN, label: 'Train', icon: '🧠' },
                   { stage: AppStage.TEST, label: 'Test', icon: '🎯' },
+                  { stage: AppStage.PORTFOLIO, label: 'Portfolio', icon: '📁' },
                 ].map((item, idx) => {
                   const isCurrent = stage === item.stage;
-                  const stageOrder = [AppStage.PREVIEW, AppStage.COLLECT, AppStage.TRAIN, AppStage.TEST];
                   const currentIdx = stageOrder.indexOf(stage);
                   const itemIdx = stageOrder.indexOf(item.stage);
                   const isComplete = itemIdx >= 0 && currentIdx > itemIdx;
@@ -112,7 +204,16 @@ function App() {
 
       {/* Main Content */}
       <div className={`flex-grow ${stage !== AppStage.CONNECT ? 'pt-24 pb-12' : ''}`}>
-        {stage === AppStage.CONNECT && <ConnectPage onConnected={handleConnected} />}
+        {stage === AppStage.CONNECT && (
+          <div className="max-w-5xl mx-auto px-4">
+            <SessionRecoveryBanner />
+            <ConnectPage onConnected={handleConnected} />
+          </div>
+        )}
+
+        {stage === AppStage.PROJECT_BRIEF && (
+          <ProjectBriefPage onComplete={handleProjectBriefComplete} />
+        )}
 
         {stage === AppStage.PREVIEW && <PreviewPage onReady={handlePreviewReady} />}
 
@@ -123,18 +224,50 @@ function App() {
         )}
 
         {stage === AppStage.TEST && trainingService && (
-          <TestPage labels={labels} trainingService={trainingService} onStartOver={handleStartOver} />
+          <TestPage
+            labels={labels}
+            trainingService={trainingService}
+            onStartOver={handleStartOver}
+            onOpenPortfolio={handleOpenPortfolio}
+          />
+        )}
+
+        {stage === AppStage.PORTFOLIO && (
+          <PortfolioPage
+            onBackToTest={() => goToStage(AppStage.TEST)}
+            onStartOver={handleStartOver}
+          />
         )}
       </div>
 
       {/* Footer */}
       <div className="bg-white border-t border-slate-200 py-4 mt-auto">
-        <div className="max-w-4xl mx-auto px-4 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
-          <span className="font-display font-bold text-primary-600">Severn Edge AI</span>
-          <span>•</span>
-          <span>v1.0</span>
+        <div className="max-w-5xl mx-auto px-4 text-center text-xs text-slate-500 space-y-2">
+          <div className="flex items-center justify-center gap-2">
+            <span className="font-display font-bold text-primary-600">Severn Edge AI</span>
+            <span>•</span>
+            <span>v2</span>
+            <ConnectionStatusPill />
+          </div>
+          <BadgeTray badgeIds={session?.badgeIds ?? []} />
         </div>
       </div>
+
+      <ReconnectModal />
+
+      {lastAwardedBadge && (
+        <BadgeToast
+          badgeId={lastAwardedBadge}
+          onClose={clearAwardedBadge}
+        />
+      )}
+
+      {activeCheckId && (
+        <KnowledgeCheckModal
+          check={KNOWLEDGE_CHECKS[activeCheckId]}
+          onPass={handleGatePass}
+        />
+      )}
     </div>
   );
 }

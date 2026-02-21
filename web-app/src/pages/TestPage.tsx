@@ -8,19 +8,29 @@ import { GestureLabel } from '../types';
 import { TrainingService } from '../services/trainingService';
 import { InferenceResult } from '../types/ble';
 import { getBLEService } from '../services/bleService';
+import { EdgeAIFactsPanel } from '../components/EdgeAIFactsPanel';
+import { useSessionStore } from '../state/sessionStore';
 
 interface TestPageProps {
   labels: GestureLabel[];
   trainingService: TrainingService;
   onStartOver?: () => void;
+  onOpenPortfolio?: () => void;
 }
 
-export function TestPage({ labels, trainingService, onStartOver }: TestPageProps) {
+export function TestPage({
+  labels,
+  trainingService,
+  onStartOver,
+  onOpenPortfolio,
+}: TestPageProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [currentPrediction, setCurrentPrediction] = useState<number | null>(null);
   const [confidence, setConfidence] = useState<number>(0);
   const [predictionHistory, setPredictionHistory] = useState<number[]>([]);
   const [useArduinoInference, setUseArduinoInference] = useState(true);
+  const [highConfidenceCount, setHighConfidenceCount] = useState(0);
+  const { addBadge } = useSessionStore();
 
   useEffect(() => {
     return () => {
@@ -39,6 +49,15 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
       await ble.startInference((result: InferenceResult) => {
         setCurrentPrediction(result.prediction);
         setConfidence(result.confidence / 100); // Convert 0-100 to 0-1
+        if (result.confidence >= 80) {
+          setHighConfidenceCount((c) => {
+            const next = c + 1;
+            if (next === 10) {
+              addBadge('sharp-shooter');
+            }
+            return next;
+          });
+        }
         
         // Add to history
         setPredictionHistory((prev) => [...prev.slice(-99), result.prediction]);
@@ -185,6 +204,10 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
                 </button>
               )}
             </div>
+
+            <div className="mt-6">
+              <EdgeAIFactsPanel />
+            </div>
           </div>
         </div>
 
@@ -257,19 +280,35 @@ export function TestPage({ labels, trainingService, onStartOver }: TestPageProps
                     <span className="text-emerald-700 font-medium">Model runs ON the Arduino!</span>
                   </li>
                 )}
+                <li className="flex gap-2">
+                  <span className="text-blue-500"></span>
+                  High-confidence count: {highConfidenceCount}/10
+                </li>
               </ul>
             </div>
           )}
 
           {/* Start Over Button */}
-          {onStartOver && !isRunning && (
-            <button
-              onClick={onStartOver}
-              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-6 rounded-xl transition-colors border border-slate-200 flex items-center justify-center gap-2"
-            >
-              <span>🏠</span>
-              <span>Start Over</span>
-            </button>
+          {!isRunning && (
+            <div className="space-y-2">
+              {onOpenPortfolio && (
+                <button
+                  onClick={onOpenPortfolio}
+                  className="w-full bg-primary-50 hover:bg-primary-100 text-primary-700 font-bold py-3 px-6 rounded-xl transition-colors border border-primary-200"
+                >
+                  Open Portfolio
+                </button>
+              )}
+              {onStartOver && (
+                <button
+                  onClick={onStartOver}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-6 rounded-xl transition-colors border border-slate-200 flex items-center justify-center gap-2"
+                >
+                  <span>🏠</span>
+                  <span>Start Over</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

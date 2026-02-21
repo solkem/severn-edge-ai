@@ -120,6 +120,14 @@ interface CollectPageProps {
   onComplete: (samples: Sample[], labels: GestureLabel[]) => void;
 }
 
+function getTimestampMs(): number {
+  return Date.now();
+}
+
+function makeClientId(prefix: string): string {
+  return `${prefix}-${crypto.randomUUID()}`;
+}
+
 export function CollectPage({ onComplete }: CollectPageProps) {
   const [labels, setLabels] = useState<GestureLabel[]>(
     COLLECTION_CONFIG.DEFAULT_GESTURES.map((name, idx) => ({
@@ -155,7 +163,7 @@ export function CollectPage({ onComplete }: CollectPageProps) {
     setRecordingProgress(0);
     setFeedback('recording');
     currentSampleData.current = [];
-    recordingStartTime.current = Date.now();
+    recordingStartTime.current = getTimestampMs();
     expectedSequence.current = -1; // Will be set on first packet
     packetLossCount.current = 0;
     isFinishing.current = false;
@@ -189,7 +197,7 @@ export function CollectPage({ onComplete }: CollectPageProps) {
         }
 
         // Update progress
-        const elapsed = Date.now() - recordingStartTime.current;
+        const elapsed = getTimestampMs() - recordingStartTime.current;
         const progress = Math.min(100, (elapsed / COLLECTION_CONFIG.SAMPLE_DURATION_MS) * 100);
         setRecordingProgress(progress);
 
@@ -221,10 +229,10 @@ export function CollectPage({ onComplete }: CollectPageProps) {
     if (quality >= 30) {
       // Accept sample (kid mode: lower threshold)
       const newSample: Sample = {
-        id: `sample-${Date.now()}-${Math.random()}`,
+        id: makeClientId('sample'),
         label: labelId,
         data: sampleData,
-        timestamp: Date.now(),
+        timestamp: getTimestampMs(),
         quality,
       };
 
@@ -292,7 +300,7 @@ export function CollectPage({ onComplete }: CollectPageProps) {
 
     setLabels((prev) => [
       ...prev,
-      { id: `label-${Date.now()}`, name: trimmed, sampleCount: 0 },
+      { id: makeClientId('label'), name: trimmed, sampleCount: 0 },
     ]);
     setNewGestureName('');
   };

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { parseSensorPacket, parseDeviceInfo } from './bleParser';
-import { SENSOR_SCALE } from '../config/constants';
 import { crc8 } from '../utils/crc8';
 
 describe('BLE Parser', () => {

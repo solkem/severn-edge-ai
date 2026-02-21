@@ -172,7 +172,6 @@ export function PreviewPage({ onReady }: PreviewPageProps) {
   }, [completedChallenges]);
 
   const allDone = completedChallenges.size >= CHALLENGES.length;
-  const activeChallenge = CHALLENGES[activeChallengeIdx];
 
   return (
     <div className="p-4 max-w-5xl mx-auto">

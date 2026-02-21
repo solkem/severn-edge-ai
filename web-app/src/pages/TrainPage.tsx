@@ -8,13 +8,16 @@
  * - Deploy to Arduino via BLE or download as header file
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Sample, GestureLabel, TrainingProgress } from '../types';
 import { TrainingService } from '../services/trainingService';
 import { KidFeedback } from '../components/KidFeedback';
 import { exportForArduino, modelToSimpleNNBytes } from '../services/modelExportService';
 import { bleModelUploadService, UploadProgress } from '../services/bleModelUploadService';
 import { getBLEService } from '../services/bleService';
+import { IdleClassBanner } from '../components/IdleClassBanner';
+import { JournalPrompt } from '../components/JournalPrompt';
+import { useSessionStore } from '../state/sessionStore';
 
 interface TrainPageProps {
   samples: Sample[];
@@ -34,19 +37,13 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
   const [trainingService] = useState(() => new TrainingService());
   const [hasModel, setHasModel] = useState(false);
   const [trainingCount, setTrainingCount] = useState(0);
+  const { setTrainingAccuracy, addBadge } = useSessionStore();
 
   // Check if we have samples to train with
   const hasSamples = samples.length > 0;
   const hasEnoughSamples = labels.every(l => l.sampleCount >= 3);
 
-  // Create untrained model when labels are available
-  useEffect(() => {
-    if (labels.length >= 1 && !hasModel) {
-      createUntrainedModel();
-    }
-  }, [labels]);
-
-  const createUntrainedModel = () => {
+  const createUntrainedModel = useCallback(() => {
     try {
       // Use at least 2 classes (single-gesture mode auto-adds Idle during training)
       const numClasses = Math.max(2, labels.length);
@@ -56,7 +53,14 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
     } catch (err) {
       console.error('Failed to create model:', err);
     }
-  };
+  }, [labels.length, trainingService]);
+
+  // Create untrained model when labels are available
+  useEffect(() => {
+    if (labels.length >= 1 && !hasModel) {
+      createUntrainedModel();
+    }
+  }, [createUntrainedModel, hasModel, labels.length]);
 
   const handleTrain = async () => {
     setIsTraining(true);
@@ -68,6 +72,10 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
       });
 
       setAccuracy(result.accuracy);
+      setTrainingAccuracy(result.accuracy);
+      if (result.accuracy >= 0.8) {
+        addBadge('ai-trainer');
+      }
       setIsDone(true);
       setIsTraining(false);
       setTrainingCount(prev => prev + 1);
@@ -93,6 +101,10 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
       });
 
       setAccuracy(result.accuracy);
+      setTrainingAccuracy(result.accuracy);
+      if (result.accuracy >= 0.8) {
+        addBadge('ai-trainer');
+      }
       setIsDone(true);
       setIsTraining(false);
       setTrainingCount(prev => prev + 1);
@@ -147,6 +159,7 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
       await bleModelUploadService.uploadModel(modelBytes, labelNames, (progress) => {
         setUploadProgress(progress);
       });
+      addBadge('edge-engineer');
 
     } catch (err) {
       console.error('BLE upload failed:', err);
@@ -318,6 +331,8 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
             <KidFeedback status="success" message="Your robot learned new tricks!" />
 
             <div className="mt-8 space-y-6 max-w-lg mx-auto">
+              <IdleClassBanner gestureCount={labels.length} />
+
               <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-8 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-2 bg-emerald-400"></div>
                 {trainingCount > 1 && (
@@ -424,6 +439,12 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
                   </div>
                 </div>
               </div>
+
+              <JournalPrompt
+                prompt="after-train"
+                title="Training Reflection"
+                placeholder="What did you change to improve model accuracy?"
+              />
 
               <button onClick={handleNext} className="btn-success text-xl w-full py-4 shadow-xl shadow-emerald-200">
                 Next: Test It Out! 
