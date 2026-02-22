@@ -11,7 +11,7 @@ The current app includes the Spec v2 classroom flow: connection recovery, persis
 ## Features
 
 - **Custom Gestures**: Students name their own gestures (2-8 classes) — not locked to presets
-- **Project Brief + Portfolio**: Students define project intent and export/share a final artifact
+- **Final Project Brief + Portfolio**: Students reflect after testing and export/share a final artifact
 - **Preview Stage**: Dedicated "What the AI sees" page with live sensor exploration challenges
 - **Live Sensor Display**: Collapsible "See what the AI sees" panel shows raw numbers during recording
 - **Checkpoint Gates**: 4 short concept checks with teacher override (`Ctrl+Shift+U`) logging
@@ -48,22 +48,22 @@ The current app includes the Spec v2 classroom flow: connection recovery, persis
 ## Student Workflow
 
 ```
-Connect → Project Brief → Preview → Collect → Train/Deploy → Test → Portfolio
+Connect → Preview → Collect → Train/Deploy → Test → Project Brief → Portfolio
 ```
 
 1. **Connect** — Plug in Arduino, pair via Bluetooth in Chrome
-2. **Project Brief** — Set student name, project name, problem statement, and use case
-3. **Preview Sensors** — Explore ax/ay/az and gx/gy/gz with student-paced mini challenges
-4. **Collect** — Name gestures and record labeled samples
-5. **Train/Deploy** — Train in browser and upload model via BLE
-6. **Test** — Run live inference + challenge scoring
+2. **Preview Sensors** — Explore ax/ay/az and gx/gy/gz with student-paced mini challenges
+3. **Collect** — Name gestures and record labeled samples
+4. **Train/Deploy** — Train in browser and upload model via BLE
+5. **Test** — Run live inference + challenge scoring
+6. **Project Brief** — Capture final reflection (student name, project name, problem, use case)
 7. **Portfolio** — Review outcomes and export/share student artifact
 
 Knowledge gates appear at key transitions:
 - `Preview -> Collect` (sensor understanding)
 - `Collect -> Train` (gesture separability)
 - `Train -> Test` (confidence meaning)
-- `Test -> Portfolio` (Edge AI concept reinforcement)
+- `Test -> Project Brief` (Edge AI concept reinforcement)
 
 ## Project Structure
 
@@ -83,7 +83,7 @@ severn-edge-ai/
 │   ├── src/
 │   │   ├── pages/
 │   │   │   ├── ConnectPage.tsx  # BLE device connection
-│   │   │   ├── ProjectBriefPage.tsx # Project definition before data collection
+│   │   │   ├── ProjectBriefPage.tsx # Final reflection after test phase
 │   │   │   ├── PreviewPage.tsx  # Sensor exploration + mini challenges
 │   │   │   ├── CollectPage.tsx  # Gesture setup + data recording
 │   │   │   ├── TrainPage.tsx    # Model training + deployment

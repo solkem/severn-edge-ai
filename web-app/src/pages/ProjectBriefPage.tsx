@@ -41,9 +41,9 @@ export function ProjectBriefPage({ onComplete }: ProjectBriefPageProps) {
   return (
     <div className="p-4 max-w-2xl mx-auto">
       <div className="card">
-        <h1 className="heading-md mb-2">Your AI Project Brief</h1>
+        <h1 className="heading-md mb-2">Final AI Project Brief</h1>
         <p className="text-slate-600 mb-6">
-          Define what you are building before collecting data.
+          You have tested your model. Now explain what you built and why.
         </p>
 
         <div className="space-y-4">
@@ -125,10 +125,9 @@ export function ProjectBriefPage({ onComplete }: ProjectBriefPageProps) {
           disabled={!canContinue}
           className="btn-primary w-full mt-6 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Continue to Sensor Preview
+          Continue to Portfolio
         </button>
       </div>
     </div>
   );
 }
-

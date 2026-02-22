@@ -1,6 +1,6 @@
 /**
  * Severn Edge AI - Main Application
- * Student workflow: Connect -> Project Brief -> Preview -> Collect -> Train -> Test -> Portfolio
+ * Student workflow: Connect -> Preview -> Collect -> Train -> Test -> Project Brief -> Portfolio
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -49,7 +49,9 @@ function App() {
   const persistedStage = session?.currentStage ?? AppStage.CONNECT;
   const stage = useMemo(() => {
     if (
-      (persistedStage === AppStage.TEST || persistedStage === AppStage.PORTFOLIO) &&
+      (persistedStage === AppStage.TEST ||
+        persistedStage === AppStage.PROJECT_BRIEF ||
+        persistedStage === AppStage.PORTFOLIO) &&
       !trainingService
     ) {
       return AppStage.TRAIN;
@@ -79,12 +81,12 @@ function App() {
     setDeviceInfo(info);
     setSessionDeviceName(info ? `${info.firmwareMajor}.${info.firmwareMinor}` : null);
     addBadge('connected');
-    goToStage(AppStage.PROJECT_BRIEF);
+    goToStage(AppStage.PREVIEW);
     connectSuccess(info ? 'Arduino' : null);
   };
 
   const handleProjectBriefComplete = () => {
-    goToStage(AppStage.PREVIEW);
+    goToStage(AppStage.PORTFOLIO);
   };
 
   const handlePreviewReady = () => {
@@ -117,7 +119,8 @@ function App() {
   };
 
   const handleOpenPortfolio = () => {
-    requestGate('gate-4-edge-ai', AppStage.PORTFOLIO);
+    const nextStage = session?.projectBrief ? AppStage.PORTFOLIO : AppStage.PROJECT_BRIEF;
+    requestGate('gate-4-edge-ai', nextStage);
   };
 
   const handleStartOver = () => {
@@ -131,11 +134,11 @@ function App() {
 
   const stageOrder = useMemo(
     () => [
-      AppStage.PROJECT_BRIEF,
       AppStage.PREVIEW,
       AppStage.COLLECT,
       AppStage.TRAIN,
       AppStage.TEST,
+      AppStage.PROJECT_BRIEF,
       AppStage.PORTFOLIO,
     ],
     [],
@@ -164,11 +167,11 @@ function App() {
               {/* Stage Progress */}
               <div className="flex items-center space-x-1 md:space-x-4 overflow-x-auto w-full md:w-auto justify-center pb-1 md:pb-0">
                 {[
-                  { stage: AppStage.PROJECT_BRIEF, label: 'Project', icon: '📋' },
                   { stage: AppStage.PREVIEW, label: 'Preview', icon: '🔍' },
                   { stage: AppStage.COLLECT, label: 'Collect', icon: '📊' },
                   { stage: AppStage.TRAIN, label: 'Train', icon: '🧠' },
                   { stage: AppStage.TEST, label: 'Test', icon: '🎯' },
+                  { stage: AppStage.PROJECT_BRIEF, label: 'Brief', icon: '📋' },
                   { stage: AppStage.PORTFOLIO, label: 'Portfolio', icon: '📁' },
                 ].map((item, idx) => {
                   const isCurrent = stage === item.stage;
