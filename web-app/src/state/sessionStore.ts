@@ -18,6 +18,7 @@ interface SessionState {
   samples: Sample[];
   journal: DesignJournalEntry[];
   recoverySessions: SessionMeta[];
+  resumeStageAfterReconnect: AppStage | null;
   isLoading: boolean;
   lastAwardedBadge: BadgeId | null;
 }
@@ -27,6 +28,7 @@ interface SessionActions {
   recoverSession: (sessionId: string) => Promise<void>;
   startFresh: () => Promise<void>;
   clearAllDataAndRestart: () => Promise<void>;
+  clearResumeStage: () => void;
   setStage: (stage: AppStage) => void;
   setDeviceName: (name: string | null) => void;
   setProjectBrief: (brief: ProjectBrief | null) => void;
@@ -71,6 +73,7 @@ export const useSessionStore = createStore<SessionStore>((set, get) => ({
   samples: [],
   journal: [],
   recoverySessions: [],
+  resumeStageAfterReconnect: null,
   isLoading: true,
   lastAwardedBadge: null,
 
@@ -91,6 +94,7 @@ export const useSessionStore = createStore<SessionStore>((set, get) => ({
       samples: [],
       journal: [],
       recoverySessions: [],
+      resumeStageAfterReconnect: null,
       isLoading: false,
     });
   },
@@ -101,10 +105,15 @@ export const useSessionStore = createStore<SessionStore>((set, get) => ({
       return;
     }
     set({
-      session: bundle.meta,
+      // Re-enter connect stage first, then resume to saved stage after reconnect.
+      session: {
+        ...bundle.meta,
+        currentStage: 'connect' as AppStage,
+      },
       samples: bundle.samples,
       journal: bundle.journal,
       recoverySessions: [],
+      resumeStageAfterReconnect: bundle.meta.currentStage,
       isLoading: false,
     });
   },
@@ -117,6 +126,7 @@ export const useSessionStore = createStore<SessionStore>((set, get) => ({
       samples: [],
       journal: [],
       recoverySessions: [],
+      resumeStageAfterReconnect: null,
       isLoading: false,
       lastAwardedBadge: null,
     });
@@ -131,15 +141,23 @@ export const useSessionStore = createStore<SessionStore>((set, get) => ({
       samples: [],
       journal: [],
       recoverySessions: [],
+      resumeStageAfterReconnect: null,
       isLoading: false,
       lastAwardedBadge: null,
     });
   },
 
+  clearResumeStage: () => {
+    set({ resumeStageAfterReconnect: null });
+  },
+
   setStage: (stage) => {
     const session = ensureSession(get().session);
     const updated = bumpRevision(session, { currentStage: stage });
-    set({ session: updated });
+    set({
+      session: updated,
+      resumeStageAfterReconnect: null,
+    });
     debouncedMetaSave(updated);
   },
 

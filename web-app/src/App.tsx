@@ -42,6 +42,10 @@ function App() {
   const setSessionDeviceName = useSessionStore((state) => state.setDeviceName);
   const setSessionGestures = useSessionStore((state) => state.setGestures);
   const setSessionSamples = useSessionStore((state) => state.setSamples);
+  const resumeStageAfterReconnect = useSessionStore(
+    (state) => state.resumeStageAfterReconnect,
+  );
+  const clearResumeStage = useSessionStore((state) => state.clearResumeStage);
   const addBadge = useSessionStore((state) => state.addBadge);
   const clearAwardedBadge = useSessionStore((state) => state.clearAwardedBadge);
   const startFresh = useSessionStore((state) => state.startFresh);
@@ -80,11 +84,25 @@ function App() {
     setActiveCheck(getKnowledgeCheckForGate(checkId));
   };
 
+  const resolvePostConnectStage = (requested: AppStageType): AppStageType => {
+    const target = requested === AppStage.CONNECT ? AppStage.PREVIEW : requested;
+    const requiresInMemoryModel =
+      target === AppStage.TEST ||
+      target === AppStage.PROJECT_BRIEF ||
+      target === AppStage.PORTFOLIO;
+    if (requiresInMemoryModel && !trainingService) {
+      return AppStage.TRAIN;
+    }
+    return target;
+  };
+
   const handleConnected = (info: DeviceInfo) => {
     setDeviceInfo(info);
     setSessionDeviceName(info ? `${info.firmwareMajor}.${info.firmwareMinor}` : null);
     addBadge('connected');
-    goToStage(AppStage.PREVIEW);
+    const requestedStage = resumeStageAfterReconnect ?? AppStage.PREVIEW;
+    goToStage(resolvePostConnectStage(requestedStage));
+    clearResumeStage();
     connectSuccess(info ? 'Arduino' : null);
   };
 
@@ -133,6 +151,7 @@ function App() {
     setTrainingService(null);
     setActiveCheck(null);
     setPendingStage(null);
+    clearResumeStage();
   };
 
   const stageOrder = useMemo(
@@ -212,6 +231,17 @@ function App() {
       <div className={`flex-grow ${stage !== AppStage.CONNECT ? 'pt-24 pb-12' : ''}`}>
         {stage === AppStage.CONNECT && (
           <div className="max-w-5xl mx-auto px-4">
+            {resumeStageAfterReconnect && session && (
+              <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <h3 className="font-bold text-emerald-900 mb-1">
+                  Session Restored
+                </h3>
+                <p className="text-emerald-800 text-sm">
+                  {session.projectBrief?.name || 'Your project'} is ready. Reconnect
+                  Arduino to continue.
+                </p>
+              </div>
+            )}
             <SessionRecoveryBanner />
             <ConnectPage onConnected={handleConnected} />
           </div>

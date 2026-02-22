@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppStage } from '../types';
 import type { Sample } from '../types';
-import type { SessionMeta } from '../storage/schema';
+import type { SessionBundle, SessionMeta } from '../storage/schema';
 
 const dbMocks = vi.hoisted(() => {
   let seq = 0;
@@ -30,7 +30,7 @@ const dbMocks = vi.hoisted(() => {
     appendJournalEntry: vi.fn(async () => undefined),
     clearAllDeviceData: vi.fn(async () => undefined),
     createEmptySessionMeta: vi.fn(() => makeSession()),
-    getSessionBundle: vi.fn(async () => null),
+    getSessionBundle: vi.fn(async (): Promise<SessionBundle | null> => null),
     listRecoverableSessions: vi.fn(async (): Promise<SessionMeta[]> => []),
     replaceSessionSamples: vi.fn(async () => undefined),
     saveSessionMetaQueued: vi.fn(async () => undefined),
@@ -63,6 +63,7 @@ describe('sessionStore', () => {
       samples: [],
       journal: [],
       recoverySessions: [],
+      resumeStageAfterReconnect: null,
       isLoading: true,
       lastAwardedBadge: null,
     });
@@ -90,6 +91,31 @@ describe('sessionStore', () => {
     expect(state.session).toBeNull();
     expect(state.recoverySessions).toEqual([recoverable]);
     expect(dbMocks.saveSessionMetaQueued).not.toHaveBeenCalled();
+  });
+
+  it('restores session data but requires reconnect before resume', async () => {
+    const recovered = {
+      ...dbMocks.makeSession('recover-2'),
+      currentStage: AppStage.TEST,
+      projectBrief: {
+        studentName: 'Ava',
+        name: 'Gesture DJ',
+        problemStatement: 'Control music with gestures',
+        useCase: 'art' as const,
+      },
+    };
+    dbMocks.getSessionBundle.mockResolvedValueOnce({
+      meta: recovered,
+      samples: [],
+      journal: [],
+    });
+
+    await useSessionStore.getState().recoverSession(recovered.id);
+
+    const state = useSessionStore.getState();
+    expect(state.session?.currentStage).toBe(AppStage.CONNECT);
+    expect(state.resumeStageAfterReconnect).toBe(AppStage.TEST);
+    expect(state.recoverySessions).toEqual([]);
   });
 
   it('awards each badge at most once', () => {
