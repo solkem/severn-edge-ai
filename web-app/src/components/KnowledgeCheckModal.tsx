@@ -7,11 +7,25 @@ interface KnowledgeCheckModalProps {
   onPass: () => void;
 }
 
+function shuffleOptions<T>(items: T[]): T[] {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const temp = next[i];
+    next[i] = next[j];
+    next[j] = temp;
+  }
+  return next;
+}
+
 export function KnowledgeCheckModal({ check, onPass }: KnowledgeCheckModalProps) {
   const [selected, setSelected] = useState<number | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const [showTeacherUnlock, setShowTeacherUnlock] = useState(false);
+  const [displayOptions] = useState(() =>
+    shuffleOptions(check.options),
+  );
 
   const { addBadge, passCheckpoint, logTeacherOverride } = useSessionStore();
 
@@ -26,13 +40,13 @@ export function KnowledgeCheckModal({ check, onPass }: KnowledgeCheckModalProps)
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const isCorrect = selected !== null && check.options[selected].correct;
+  const isCorrect = selected !== null && displayOptions[selected].correct;
 
   const submit = () => {
     if (selected === null) return;
     setShowResult(true);
 
-    if (check.options[selected].correct) {
+    if (displayOptions[selected].correct) {
       passCheckpoint(check.id);
       if (check.badgeOnPass) {
         addBadge(check.badgeOnPass);
@@ -63,7 +77,7 @@ export function KnowledgeCheckModal({ check, onPass }: KnowledgeCheckModalProps)
         <p className="text-slate-700 mb-5">{check.question}</p>
 
         <div className="space-y-3 mb-4">
-          {check.options.map((option, i) => (
+          {displayOptions.map((option, i) => (
             <button
               key={option.text}
               onClick={() => !showResult && setSelected(i)}
@@ -128,4 +142,3 @@ export function KnowledgeCheckModal({ check, onPass }: KnowledgeCheckModalProps)
     </div>
   );
 }
-

@@ -23,13 +23,16 @@ import { SessionRecoveryBanner } from './components/SessionRecoveryBanner';
 import { BadgeToast } from './components/BadgeToast';
 import { BadgeTray } from './components/BadgeTray';
 import { KnowledgeCheckModal } from './components/KnowledgeCheckModal';
-import { KNOWLEDGE_CHECKS } from './data/knowledgeChecks';
+import {
+  getKnowledgeCheckForGate,
+  type KnowledgeCheck,
+} from './data/knowledgeChecks';
 import type { CheckpointId } from './storage/schema';
 
 function App() {
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const [trainingService, setTrainingService] = useState<TrainingService | null>(null);
-  const [activeCheckId, setActiveCheckId] = useState<CheckpointId | null>(null);
+  const [activeCheck, setActiveCheck] = useState<KnowledgeCheck | null>(null);
   const [pendingStage, setPendingStage] = useState<AppStageType | null>(null);
 
   const initializeSession = useSessionStore((state) => state.initialize);
@@ -74,7 +77,7 @@ function App() {
       return;
     }
     setPendingStage(nextStage);
-    setActiveCheckId(checkId);
+    setActiveCheck(getKnowledgeCheckForGate(checkId));
   };
 
   const handleConnected = (info: DeviceInfo) => {
@@ -114,7 +117,7 @@ function App() {
     if (pendingStage) {
       goToStage(pendingStage);
     }
-    setActiveCheckId(null);
+    setActiveCheck(null);
     setPendingStage(null);
   };
 
@@ -128,7 +131,7 @@ function App() {
     void startFresh();
     setDeviceInfo(null);
     setTrainingService(null);
-    setActiveCheckId(null);
+    setActiveCheck(null);
     setPendingStage(null);
   };
 
@@ -265,9 +268,10 @@ function App() {
         />
       )}
 
-      {activeCheckId && (
+      {activeCheck && (
         <KnowledgeCheckModal
-          check={KNOWLEDGE_CHECKS[activeCheckId]}
+          key={`${activeCheck.id}:${activeCheck.question}`}
+          check={activeCheck}
           onPass={handleGatePass}
         />
       )}
