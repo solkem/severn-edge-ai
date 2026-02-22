@@ -234,6 +234,7 @@ export function CollectPage({ onComplete }: CollectPageProps) {
         data: sampleData,
         timestamp: getTimestampMs(),
         quality,
+        split: 'train',
       };
 
       setSamples((prev) => [...prev, newSample]);

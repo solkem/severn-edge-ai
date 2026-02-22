@@ -1,15 +1,27 @@
 /**
- * Test Page - Live Inference Testing
- * Uses Arduino-side inference (model runs on device!)
+ * Test Page - Live Inference + Objective Model Testing
+ *
+ * Live Challenge:
+ * - Student-facing, immediate feedback while moving the board.
+ *
+ * Model Testing:
+ * - Edge-Impulse-style "classify all test samples" with confusion matrix
+ *   and per-class metrics.
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import type { GestureLabel } from '../types';
+import type { GestureLabel, Sample } from '../types';
 import { TrainingService } from '../services/trainingService';
 import type { InferenceResult } from '../types/ble';
 import { getBLEService } from '../services/bleService';
 import { EdgeAIFactsPanel } from '../components/EdgeAIFactsPanel';
 import { useSessionStore } from '../state/sessionStore';
+import {
+  createRecommendedTestSplit,
+  evaluateModelOnSamples,
+  splitSamplesByDataset,
+  type ModelTestingReport,
+} from '../services/modelTestingService';
 
 const CHALLENGE_MIN_ATTEMPTS = 10;
 const CHALLENGE_TARGET_SUCCESS_RATE = 0.8;
@@ -17,6 +29,8 @@ const CHALLENGE_MIN_CONFIDENCE = 0.7;
 const CHALLENGE_REQUIRED_SUCCESSES = Math.ceil(
   CHALLENGE_MIN_ATTEMPTS * CHALLENGE_TARGET_SUCCESS_RATE,
 );
+
+type TestingMode = 'live' | 'model-testing';
 
 interface ChallengeStats {
   attempts: number;
@@ -44,6 +58,24 @@ function hasPassedGestureChallenge(stats: ChallengeStats): boolean {
   );
 }
 
+function formatPercent(value: number, digits = 1): string {
+  return `${(value * 100).toFixed(digits)}%`;
+}
+
+function buildCountsByLabel(
+  samples: Sample[],
+  labels: GestureLabel[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const label of labels) {
+    counts.set(label.id, 0);
+  }
+  for (const sample of samples) {
+    counts.set(sample.label, (counts.get(sample.label) ?? 0) + 1);
+  }
+  return counts;
+}
+
 interface TestPageProps {
   labels: GestureLabel[];
   trainingService: TrainingService;
@@ -57,24 +89,49 @@ export function TestPage({
   onStartOver,
   onOpenPortfolio,
 }: TestPageProps) {
+  const [mode, setMode] = useState<TestingMode>('live');
+
+  // Live Challenge state
   const [isRunning, setIsRunning] = useState(false);
   const [currentPrediction, setCurrentPrediction] = useState<number | null>(null);
-  const [confidence, setConfidence] = useState<number>(0);
+  const [confidence, setConfidence] = useState(0);
   const [predictionHistory, setPredictionHistory] = useState<number[]>([]);
   const [useArduinoInference, setUseArduinoInference] = useState(true);
   const [highConfidenceCount, setHighConfidenceCount] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const [showDistribution, setShowDistribution] = useState(false);
   const [targetGestureIndex, setTargetGestureIndex] = useState(0);
   const [challengeNote, setChallengeNote] = useState<string | null>(null);
   const [challengeStats, setChallengeStats] = useState<Record<string, ChallengeStats>>(
     () => createInitialChallengeStats(labels),
   );
-  const { addBadge } = useSessionStore();
+
+  // Model Testing state
+  const [isApplyingSplit, setIsApplyingSplit] = useState(false);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [testingError, setTestingError] = useState<string | null>(null);
+  const [testingInfo, setTestingInfo] = useState<string | null>(null);
+  const [report, setReport] = useState<ModelTestingReport | null>(null);
+
+  const sessionSamples = useSessionStore((state) => state.samples);
+  const setSessionSamples = useSessionStore((state) => state.setSamples);
+  const addBadge = useSessionStore((state) => state.addBadge);
+
+  const { trainingSamples, testingSamples } = useMemo(
+    () => splitSamplesByDataset(sessionSamples),
+    [sessionSamples],
+  );
+  const trainingCountsByLabel = useMemo(
+    () => buildCountsByLabel(trainingSamples, labels),
+    [labels, trainingSamples],
+  );
+  const testingCountsByLabel = useMemo(
+    () => buildCountsByLabel(testingSamples, labels),
+    [labels, testingSamples],
+  );
 
   useEffect(() => {
     return () => {
-      // Cleanup on unmount: stop both stream types to avoid stale closure issues.
       const ble = getBLEService();
       void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
     };
@@ -90,16 +147,29 @@ export function TestPage({
       }
       return next;
     });
-
     setTargetGestureIndex((current) => {
       if (labels.length === 0) return 0;
       return Math.min(current, labels.length - 1);
     });
   }, [labels]);
 
+  useEffect(() => {
+    setReport(null);
+  }, [sessionSamples, labels]);
+
+  useEffect(() => {
+    if (mode !== 'model-testing' || !isRunning) {
+      return;
+    }
+
+    const ble = getBLEService();
+    void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
+    setIsRunning(false);
+  }, [isRunning, mode]);
+
   const startTesting = async () => {
     const ble = getBLEService();
-    setError(null);
+    setLiveError(null);
     setChallengeNote(null);
     setCurrentPrediction(null);
     setConfidence(0);
@@ -107,24 +177,21 @@ export function TestPage({
 
     try {
       if (useArduinoInference) {
-        // Use inference running ON the Arduino.
         await ble.startInference((result: InferenceResult) => {
           setCurrentPrediction(result.prediction);
-          setConfidence(result.confidence / 100); // Convert 0-100 to 0-1.
+          setConfidence(result.confidence / 100);
           if (result.confidence >= 80) {
-            setHighConfidenceCount((c) => {
-              const next = c + 1;
+            setHighConfidenceCount((prev) => {
+              const next = prev + 1;
               if (next === 10) {
                 addBadge('sharp-shooter');
               }
               return next;
             });
           }
-          // Keep a fixed-size history for distribution diagnostics.
           setPredictionHistory((prev) => [...prev.slice(-99), result.prediction]);
         });
       } else {
-        // Fallback: browser-side inference (requires model not disposed).
         const { MODEL_CONFIG } = await import('../config/constants');
         const sampleBuffer: number[][] = [];
 
@@ -135,15 +202,12 @@ export function TestPage({
           ]);
 
           if (sampleBuffer.length >= MODEL_CONFIG.WINDOW_SIZE) {
-            const predictionResult = trainingService.predict(
+            const result = trainingService.predict(
               sampleBuffer.slice(-MODEL_CONFIG.WINDOW_SIZE),
             );
-            setCurrentPrediction(predictionResult.prediction);
-            setConfidence(predictionResult.confidence);
-            setPredictionHistory((prev) => [
-              ...prev.slice(-99),
-              predictionResult.prediction,
-            ]);
+            setCurrentPrediction(result.prediction);
+            setConfidence(result.confidence);
+            setPredictionHistory((prev) => [...prev.slice(-99), result.prediction]);
             sampleBuffer.splice(0, sampleBuffer.length - MODEL_CONFIG.WINDOW_STRIDE);
           }
         });
@@ -151,7 +215,7 @@ export function TestPage({
     } catch (err) {
       setIsRunning(false);
       console.error('Start testing failed:', err);
-      setError(
+      setLiveError(
         err instanceof Error
           ? err.message
           : 'Failed to start testing. Reconnect and try again.',
@@ -169,17 +233,12 @@ export function TestPage({
       }
     } catch (err) {
       console.error('Stop testing failed:', err);
-      setError(
+      setLiveError(
         err instanceof Error ? err.message : 'Failed to stop testing cleanly.',
       );
     } finally {
       setIsRunning(false);
     }
-  };
-
-  const resetChallenge = () => {
-    setChallengeStats(createInitialChallengeStats(labels));
-    setChallengeNote(null);
   };
 
   const scoreCurrentAttempt = () => {
@@ -218,7 +277,7 @@ export function TestPage({
 
     if (isSuccess) {
       setChallengeNote(
-        `Nice! "${target.name}" detected at ${(confidence * 100).toFixed(0)}% confidence.`,
+        `Nice! "${target.name}" detected at ${formatPercent(confidence, 0)} confidence.`,
       );
       return;
     }
@@ -231,30 +290,34 @@ export function TestPage({
     }
 
     setChallengeNote(
-      `Close. Correct gesture, but confidence ${(confidence * 100).toFixed(0)}% is below ${(CHALLENGE_MIN_CONFIDENCE * 100).toFixed(0)}%.`,
+      `Close. Correct gesture, but confidence ${formatPercent(confidence, 0)} is below ${formatPercent(CHALLENGE_MIN_CONFIDENCE, 0)}.`,
     );
+  };
+
+  const resetChallenge = () => {
+    setChallengeStats(createInitialChallengeStats(labels));
+    setChallengeNote(null);
   };
 
   const predictionCounts = useMemo(() => {
     const counts = new Array(labels.length).fill(0);
     for (const pred of predictionHistory) {
       if (pred >= 0 && pred < counts.length) {
-        counts[pred]++;
+        counts[pred] += 1;
       }
     }
     return counts;
-  }, [predictionHistory, labels.length]);
+  }, [labels.length, predictionHistory]);
 
   const challengeRows = useMemo(() => {
     return labels.map((label, idx) => {
       const stats = challengeStats[label.id] ?? { attempts: 0, successes: 0 };
-      const successRate = getSuccessRate(stats);
       return {
         label,
         index: idx,
         attempts: stats.attempts,
         successes: stats.successes,
-        successRate,
+        successRate: getSuccessRate(stats),
         passed: hasPassedGestureChallenge(stats),
       };
     });
@@ -272,7 +335,6 @@ export function TestPage({
     const weakGestures = challengeRows
       .filter((row) => row.attempts >= CHALLENGE_MIN_ATTEMPTS && !row.passed)
       .map((row) => row.label.name);
-
     if (weakGestures.length > 0) {
       return `Retrain or recollect cleaner examples for: ${weakGestures.join(', ')}.`;
     }
@@ -280,7 +342,6 @@ export function TestPage({
     const inProgress = challengeRows
       .filter((row) => row.attempts > 0 && row.attempts < CHALLENGE_MIN_ATTEMPTS)
       .map((row) => row.label.name);
-
     if (inProgress.length > 0) {
       return `Keep scoring attempts for: ${inProgress.join(', ')}.`;
     }
@@ -288,15 +349,111 @@ export function TestPage({
     return 'Pick a gesture target and start scoring attempts.';
   }, [challengeComplete, challengeRows]);
 
-  return (
-    <div className="p-4 max-w-4xl mx-auto">
+  const applyRecommendedSplit = async () => {
+    setTestingError(null);
+    setTestingInfo(null);
+    setIsApplyingSplit(true);
+    try {
+      const updated = createRecommendedTestSplit(sessionSamples, labels, 0.2);
+      await setSessionSamples(updated);
+      const { testingSamples: nextTesting } = splitSamplesByDataset(updated);
+      setTestingInfo(
+        `Created recommended split with ${nextTesting.length} held-out test samples. Retrain before trusting the score.`,
+      );
+    } catch (err) {
+      console.error('Failed to apply split:', err);
+      setTestingError(
+        err instanceof Error ? err.message : 'Failed to create test split.',
+      );
+    } finally {
+      setIsApplyingSplit(false);
+    }
+  };
+
+  const evaluateAllTestSamples = () => {
+    setTestingError(null);
+    setTestingInfo(null);
+    if (testingSamples.length === 0) {
+      setTestingError(
+        'No test samples found. Create a test split first, then run model testing.',
+      );
+      return;
+    }
+
+    setIsEvaluating(true);
+    try {
+      const nextReport = evaluateModelOnSamples(
+        testingSamples,
+        labels,
+        (sampleData) => trainingService.predict(sampleData),
+      );
+      setReport(nextReport);
+      setTestingInfo(
+        `Classified ${nextReport.totalSamples} test samples. Accuracy: ${formatPercent(nextReport.accuracy)}.`,
+      );
+    } catch (err) {
+      console.error('Model testing failed:', err);
+      setTestingError(
+        err instanceof Error ? err.message : 'Failed to classify test samples.',
+      );
+      setReport(null);
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
+  const moveSampleToTraining = async (sampleId: string) => {
+    setTestingError(null);
+    setTestingInfo(null);
+    try {
+      const updated = sessionSamples.map((sample) =>
+        sample.id === sampleId ? { ...sample, split: 'train' as const } : sample,
+      );
+      await setSessionSamples(updated);
+      setTestingInfo('Moved sample back to training set.');
+    } catch (err) {
+      console.error('Failed to move sample:', err);
+      setTestingError(
+        err instanceof Error ? err.message : 'Failed to move sample.',
+      );
+    }
+  };
+
+  const moveFailedSamplesToTraining = async () => {
+    if (!report) return;
+
+    const failedIds = new Set(
+      report.sampleResults.filter((result) => !result.correct).map((result) => result.sampleId),
+    );
+    if (failedIds.size === 0) {
+      setTestingInfo('No failed samples to move.');
+      return;
+    }
+
+    setTestingError(null);
+    setTestingInfo(null);
+    try {
+      const updated = sessionSamples.map((sample) =>
+        failedIds.has(sample.id) ? { ...sample, split: 'train' as const } : sample,
+      );
+      await setSessionSamples(updated);
+      setTestingInfo(`Moved ${failedIds.size} failed samples back to training set.`);
+    } catch (err) {
+      console.error('Failed to move failed samples:', err);
+      setTestingError(
+        err instanceof Error ? err.message : 'Failed to move failed samples.',
+      );
+    }
+  };
+
+  const renderLiveChallenge = () => {
+    return (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Controls & Live View */}
         <div className="lg:col-span-2 space-y-6">
           <div className="card bg-gradient-to-br from-white to-slate-50">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h1 className="heading-md mb-2">🧪 Test Your Model</h1>
+                <h1 className="heading-md mb-2">🧪 Live Challenge</h1>
                 <p className="text-slate-600">
                   {useArduinoInference
                     ? 'AI runs on Arduino. Perform gestures and score challenge attempts.'
@@ -304,7 +461,6 @@ export function TestPage({
                 </p>
               </div>
 
-              {/* Mode Toggle */}
               <div className="flex items-center gap-2">
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -322,9 +478,7 @@ export function TestPage({
               </div>
             </div>
 
-            {/* Live Prediction Display */}
             <div className="bg-slate-900 rounded-2xl p-8 text-center relative overflow-hidden min-h-[300px] flex flex-col items-center justify-center">
-              {/* Background Grid */}
               <div
                 className="absolute inset-0 opacity-10"
                 style={{
@@ -354,11 +508,10 @@ export function TestPage({
                         }`}
                       />
                       <span className="text-slate-300 font-mono">
-                        {(confidence * 100).toFixed(1)}% Confident
+                        {formatPercent(confidence)} Confident
                       </span>
                     </div>
 
-                    {/* Confidence Bar */}
                     <div className="mt-8 w-64 mx-auto bg-slate-800 rounded-full h-2 overflow-hidden">
                       <div
                         className={`h-full transition-all duration-300 ${
@@ -402,9 +555,9 @@ export function TestPage({
               )}
             </div>
 
-            {error && (
+            {liveError && (
               <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-                {error}
+                {liveError}
               </div>
             )}
 
@@ -414,9 +567,7 @@ export function TestPage({
           </div>
         </div>
 
-        {/* Right Column: Challenge-first Testing */}
         <div className="space-y-6">
-          {/* Student Challenge */}
           <div className="card bg-gradient-to-br from-amber-50 to-white border border-amber-200">
             <h3 className="font-bold text-amber-900 mb-2 flex items-center gap-2">
               <span className="text-xl">🏁</span> Student Challenge
@@ -431,10 +582,10 @@ export function TestPage({
                 {CHALLENGE_MIN_ATTEMPTS} attempts / gesture
               </span>
               <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                {Math.round(CHALLENGE_TARGET_SUCCESS_RATE * 100)}% success target
+                {formatPercent(CHALLENGE_TARGET_SUCCESS_RATE, 0)} success target
               </span>
               <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                {(CHALLENGE_MIN_CONFIDENCE * 100).toFixed(0)}%+ confidence required
+                {formatPercent(CHALLENGE_MIN_CONFIDENCE, 0)}+ confidence required
               </span>
             </div>
 
@@ -505,7 +656,6 @@ export function TestPage({
             )}
           </div>
 
-          {/* Challenge Breakdown */}
           <div className="card">
             <h3 className="font-bold text-slate-800 mb-3">Per-Gesture Scoreboard</h3>
             <div className="space-y-3">
@@ -569,7 +719,6 @@ export function TestPage({
             </div>
           </div>
 
-          {/* Coaching */}
           <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
             <h3 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
               <span className="text-xl">🧭</span> Coach
@@ -586,7 +735,6 @@ export function TestPage({
             </ul>
           </div>
 
-          {/* Distribution (advanced/teacher view) */}
           <div className="card h-full">
             <button
               onClick={() => setShowDistribution((open) => !open)}
@@ -639,7 +787,6 @@ export function TestPage({
             )}
           </div>
 
-          {/* Start Over Button */}
           {!isRunning && (
             <div className="space-y-2">
               {onOpenPortfolio && (
@@ -663,6 +810,288 @@ export function TestPage({
           )}
         </div>
       </div>
+    );
+  };
+
+  const renderModelTesting = () => {
+    return (
+      <div className="space-y-6">
+        <div className="card bg-gradient-to-br from-white to-slate-50">
+          <h2 className="heading-md mb-2">📊 Model Testing</h2>
+          <p className="text-slate-600">
+            Objective evaluation on held-out samples. This is where you verify if your
+            model really generalizes.
+          </p>
+        </div>
+
+        <div className="card">
+          <h3 className="font-bold text-slate-800 mb-3">Dataset Split</h3>
+          <p className="text-sm text-slate-600 mb-4">
+            Training uses <code>train</code> samples. Model testing classifies only
+            <code> test</code> samples.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Train samples</div>
+              <div className="text-2xl font-bold text-slate-800">{trainingSamples.length}</div>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <div className="text-xs uppercase tracking-wide text-amber-700">Test samples</div>
+              <div className="text-2xl font-bold text-amber-800">{testingSamples.length}</div>
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+              <div className="text-xs uppercase tracking-wide text-blue-700">Gestures</div>
+              <div className="text-2xl font-bold text-blue-800">{labels.length}</div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-500 border-b border-slate-200">
+                  <th className="py-2 pr-4">Gesture</th>
+                  <th className="py-2 pr-4">Train</th>
+                  <th className="py-2 pr-4">Test</th>
+                </tr>
+              </thead>
+              <tbody>
+                {labels.map((label) => (
+                  <tr key={label.id} className="border-b border-slate-100 text-slate-700">
+                    <td className="py-2 pr-4 font-medium">{label.name}</td>
+                    <td className="py-2 pr-4">{trainingCountsByLabel.get(label.id) ?? 0}</td>
+                    <td className="py-2 pr-4">{testingCountsByLabel.get(label.id) ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              onClick={applyRecommendedSplit}
+              disabled={isApplyingSplit}
+              className="btn-secondary bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300"
+            >
+              {isApplyingSplit ? 'Applying...' : 'Create Recommended Test Split (20%)'}
+            </button>
+            <button
+              onClick={evaluateAllTestSamples}
+              disabled={isEvaluating || testingSamples.length === 0}
+              className="btn-primary disabled:opacity-50"
+            >
+              {isEvaluating ? 'Classifying...' : 'Classify All Test Samples'}
+            </button>
+          </div>
+
+          <p className="mt-3 text-xs text-slate-500">
+            After changing the split, retrain the model before trusting this score.
+          </p>
+
+          {testingError && (
+            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+              {testingError}
+            </div>
+          )}
+          {testingInfo && (
+            <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+              {testingInfo}
+            </div>
+          )}
+        </div>
+
+        {report && (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="text-xs uppercase tracking-wide text-emerald-700">Accuracy</div>
+                <div className="text-3xl font-bold text-emerald-800">
+                  {formatPercent(report.accuracy)}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <div className="text-xs uppercase tracking-wide text-blue-700">Macro F1</div>
+                <div className="text-3xl font-bold text-blue-800">
+                  {formatPercent(report.macroF1)}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs uppercase tracking-wide text-slate-500">Samples</div>
+                <div className="text-3xl font-bold text-slate-700">
+                  {report.correctSamples}/{report.totalSamples}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="text-xs uppercase tracking-wide text-amber-700">Mean confidence</div>
+                <div className="text-3xl font-bold text-amber-800">
+                  {formatPercent(report.meanConfidence)}
+                </div>
+              </div>
+            </div>
+
+            <div className="card">
+              <h3 className="font-bold text-slate-800 mb-3">Confusion Matrix</h3>
+              <p className="text-sm text-slate-500 mb-4">
+                Rows are expected labels. Columns are predicted labels.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="min-w-full border border-slate-200 text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-600">
+                      <th className="p-2 border border-slate-200 text-left">Expected ↓ / Predicted →</th>
+                      {labels.map((label) => (
+                        <th key={label.id} className="p-2 border border-slate-200">
+                          {label.name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {labels.map((label, rowIdx) => (
+                      <tr key={label.id}>
+                        <td className="p-2 border border-slate-200 font-medium text-slate-700 bg-slate-50">
+                          {label.name}
+                        </td>
+                        {labels.map((predicted, colIdx) => {
+                          const value = report.confusionMatrix[rowIdx][colIdx];
+                          const isDiagonal = rowIdx === colIdx;
+                          return (
+                            <td
+                              key={predicted.id}
+                              className={`p-2 border border-slate-200 text-center font-semibold ${
+                                isDiagonal ? 'text-emerald-700' : 'text-slate-700'
+                              }`}
+                            >
+                              {value}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="card">
+              <h3 className="font-bold text-slate-800 mb-3">Per-Class Metrics</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-500 border-b border-slate-200">
+                      <th className="py-2 pr-4">Class</th>
+                      <th className="py-2 pr-4">Support</th>
+                      <th className="py-2 pr-4">Precision</th>
+                      <th className="py-2 pr-4">Recall</th>
+                      <th className="py-2 pr-4">F1</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.labelMetrics.map((metric) => (
+                      <tr key={metric.labelId} className="border-b border-slate-100">
+                        <td className="py-2 pr-4 font-medium text-slate-700">{metric.labelName}</td>
+                        <td className="py-2 pr-4 text-slate-600">{metric.support}</td>
+                        <td className="py-2 pr-4 text-slate-600">{formatPercent(metric.precision)}</td>
+                        <td className="py-2 pr-4 text-slate-600">{formatPercent(metric.recall)}</td>
+                        <td className="py-2 pr-4 text-slate-600">{formatPercent(metric.f1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h3 className="font-bold text-slate-800">Per-Sample Results</h3>
+                <button
+                  onClick={moveFailedSamplesToTraining}
+                  className="btn-secondary bg-amber-100 hover:bg-amber-200 border-amber-300 text-amber-900"
+                >
+                  Move Failed Samples to Training
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-500 border-b border-slate-200">
+                      <th className="py-2 pr-4">Sample</th>
+                      <th className="py-2 pr-4">Expected</th>
+                      <th className="py-2 pr-4">Predicted</th>
+                      <th className="py-2 pr-4">Confidence</th>
+                      <th className="py-2 pr-4">Result</th>
+                      <th className="py-2 pr-4">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.sampleResults.map((result) => (
+                      <tr key={result.sampleId} className="border-b border-slate-100">
+                        <td className="py-2 pr-4 text-slate-500 font-mono">{result.sampleId.slice(0, 8)}</td>
+                        <td className="py-2 pr-4 text-slate-700">{result.expectedLabelName}</td>
+                        <td className="py-2 pr-4 text-slate-700">{result.predictedLabelName}</td>
+                        <td className="py-2 pr-4 text-slate-600">{formatPercent(result.confidence)}</td>
+                        <td className="py-2 pr-4">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
+                              result.correct
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-rose-100 text-rose-700'
+                            }`}
+                          >
+                            {result.correct ? 'Correct' : 'Incorrect'}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-4">
+                          <button
+                            onClick={() => {
+                              void moveSampleToTraining(result.sampleId);
+                            }}
+                            className="text-xs font-semibold text-primary-700 hover:text-primary-800"
+                          >
+                            Move to train
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="p-4 max-w-5xl mx-auto space-y-6">
+      <div className="card bg-white border border-slate-200">
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setMode('live')}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
+              mode === 'live'
+                ? 'bg-primary-600 text-white'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Live Challenge
+          </button>
+          <button
+            onClick={() => setMode('model-testing')}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
+              mode === 'model-testing'
+                ? 'bg-primary-600 text-white'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Model Testing
+          </button>
+        </div>
+      </div>
+
+      {mode === 'live' ? renderLiveChallenge() : renderModelTesting()}
     </div>
   );
 }

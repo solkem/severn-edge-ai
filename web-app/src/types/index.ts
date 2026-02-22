@@ -32,6 +32,7 @@ export interface Sample {
   data: number[][];  // Array of [ax, ay, az, gx, gy, gz] samples
   timestamp: number;
   quality: number;   // 0-100 quality score
+  split?: 'train' | 'test';
 }
 
 // ============================================================================

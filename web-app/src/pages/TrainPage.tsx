@@ -8,7 +8,7 @@
  * - Deploy to Arduino via BLE or download as header file
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Sample, GestureLabel, TrainingProgress } from '../types';
 import { TrainingService } from '../services/trainingService';
 import { KidFeedback } from '../components/KidFeedback';
@@ -39,9 +39,42 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
   const [trainingCount, setTrainingCount] = useState(0);
   const { setTrainingAccuracy, addBadge } = useSessionStore();
 
+  const trainingSamples = useMemo(
+    () => samples.filter((sample) => sample.split !== 'test'),
+    [samples],
+  );
+  const testSamples = useMemo(
+    () => samples.filter((sample) => sample.split === 'test'),
+    [samples],
+  );
+
+  const trainingSampleCountByLabel = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const label of labels) {
+      counts.set(label.id, 0);
+    }
+    for (const sample of trainingSamples) {
+      counts.set(sample.label, (counts.get(sample.label) ?? 0) + 1);
+    }
+    return counts;
+  }, [labels, trainingSamples]);
+
+  const testSampleCountByLabel = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const label of labels) {
+      counts.set(label.id, 0);
+    }
+    for (const sample of testSamples) {
+      counts.set(sample.label, (counts.get(sample.label) ?? 0) + 1);
+    }
+    return counts;
+  }, [labels, testSamples]);
+
   // Check if we have samples to train with
-  const hasSamples = samples.length > 0;
-  const hasEnoughSamples = labels.every(l => l.sampleCount >= 3);
+  const hasSamples = trainingSamples.length > 0;
+  const hasEnoughSamples = labels.every(
+    (label) => (trainingSampleCountByLabel.get(label.id) ?? 0) >= 3,
+  );
 
   const createUntrainedModel = useCallback(() => {
     try {
@@ -67,7 +100,7 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
     setError(null);
 
     try {
-      const result = await trainingService.train(samples, labels, (prog) => {
+      const result = await trainingService.train(trainingSamples, labels, (prog) => {
         setProgress(prog);
       });
 
@@ -96,7 +129,7 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
     setError(null);
 
     try {
-      const result = await trainingService.train(samples, labels, (prog) => {
+      const result = await trainingService.train(trainingSamples, labels, (prog) => {
         setProgress(prog);
       });
 
@@ -206,17 +239,27 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
               </h3>
               <div className="space-y-3">
                 <div className="flex justify-between items-center p-3 bg-white rounded-xl border border-slate-100">
-                  <span className="text-slate-600">Total Samples</span>
-                  <span className={`font-bold text-lg ${samples.length > 0 ? 'text-primary-600' : 'text-slate-400'}`}>
-                    {samples.length}
+                  <span className="text-slate-600">Training Samples</span>
+                  <span className={`font-bold text-lg ${trainingSamples.length > 0 ? 'text-primary-600' : 'text-slate-400'}`}>
+                    {trainingSamples.length}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-white rounded-xl border border-slate-100">
+                  <span className="text-slate-600">Held-out Test Samples</span>
+                  <span className={`font-bold text-lg ${testSamples.length > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
+                    {testSamples.length}
                   </span>
                 </div>
                 <div className="space-y-2">
                   {labels.map((label) => (
                     <div key={label.id} className="flex justify-between text-sm text-slate-500 px-2">
                       <span>{label.name}</span>
-                      <span className={label.sampleCount >= 3 ? 'text-emerald-600' : 'text-amber-600'}>
-                        {label.sampleCount} samples {label.sampleCount < 3 && '(need 3+)'}
+                      <span className={(trainingSampleCountByLabel.get(label.id) ?? 0) >= 3 ? 'text-emerald-600' : 'text-amber-600'}>
+                        {trainingSampleCountByLabel.get(label.id) ?? 0} train
+                        {' / '}
+                        {testSampleCountByLabel.get(label.id) ?? 0} test
+                        {' '}
+                        {(trainingSampleCountByLabel.get(label.id) ?? 0) < 3 && '(need 3+ train)'}
                       </span>
                     </div>
                   ))}

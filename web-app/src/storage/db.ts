@@ -203,6 +203,7 @@ export async function getSessionBundle(sessionId: string): Promise<SessionBundle
     data: s.data,
     timestamp: s.timestamp,
     quality: s.quality,
+    split: s.split,
   }));
 
   return {
