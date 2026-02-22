@@ -6,11 +6,18 @@ Machine learning education platform for Arduino BLE — students train gesture r
 
 Severn Edge AI enables 5th-grade students to collect motion data, train a neural network in their browser, and deploy it to an Arduino Nano 33 BLE for real-time inference. The system teaches core ML concepts through hands-on experience with real hardware.
 
+The current app includes the Spec v2 classroom flow: connection recovery, persistent sessions, knowledge checkpoints, and a final portfolio artifact.
+
 ## Features
 
 - **Custom Gestures**: Students name their own gestures (2-8 classes) — not locked to presets
+- **Project Brief + Portfolio**: Students define project intent and export/share a final artifact
 - **Preview Stage**: Dedicated "What the AI sees" page with live sensor exploration challenges
 - **Live Sensor Display**: Collapsible "See what the AI sees" panel shows raw numbers during recording
+- **Checkpoint Gates**: 4 short concept checks with teacher override (`Ctrl+Shift+U`) logging
+- **Session Recovery**: IndexedDB persistence restores student work after accidental refresh
+- **Reconnect UX**: Connection state pill + reconnect modal + user-action fallback for Web Bluetooth limits
+- **Badges + Journal**: Lightweight engagement system and design reflection prompts
 - **Friendly Device Names**: Each Arduino shows as `SevernEdgeAI-1`, `SevernEdgeAI-2`, etc. via configurable lookup table
 - **Kid-Friendly UX**: Celebratory feedback, gentle quality validation, step-by-step wizard flow
 - **In-Browser Training**: TensorFlow.js trains the model entirely in Chrome — no server needed
@@ -23,8 +30,9 @@ Severn Edge AI enables 5th-grade students to collect motion data, train a neural
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Web App (Browser)                         │
 │  React + TypeScript + TensorFlow.js + Tailwind CSS              │
-│  - Choose gestures → Collect data via BLE → Train in browser    │
-│  - Deploy model to Arduino via BLE OTA                          │
+│  - Stage flow + checkpoints + portfolio export                   │
+│  - BLE connection state machine + recovery/persistence           │
+│  - Collect data → Train in browser → Upload to Arduino           │
 └─────────────────────────────────────────────────────────────────┘
                               │ BLE
                               ▼
@@ -40,16 +48,22 @@ Severn Edge AI enables 5th-grade students to collect motion data, train a neural
 ## Student Workflow
 
 ```
-Connect → Preview Sensors → Choose Gestures → Record Samples → Train → Deploy → Test
+Connect → Project Brief → Preview → Collect → Train/Deploy → Test → Portfolio
 ```
 
 1. **Connect** — Plug in Arduino, pair via Bluetooth in Chrome
-2. **Preview Sensors** — Explore ax/ay/az and gx/gy/gz with student-paced mini challenges
-3. **Choose Gestures** — Name 1-8 custom gestures (defaults: Wave, Shake, Circle)
-4. **Record Samples** — Perform each gesture 10+ times while the app records sensor data
-5. **Train** — Train the neural network in-browser and review training accuracy
-6. **Deploy** — Upload the trained model to Arduino over Bluetooth
-7. **Test** — Perform gestures and run the 10-turn challenge
+2. **Project Brief** — Set student name, project name, problem statement, and use case
+3. **Preview Sensors** — Explore ax/ay/az and gx/gy/gz with student-paced mini challenges
+4. **Collect** — Name gestures and record labeled samples
+5. **Train/Deploy** — Train in browser and upload model via BLE
+6. **Test** — Run live inference + challenge scoring
+7. **Portfolio** — Review outcomes and export/share student artifact
+
+Knowledge gates appear at key transitions:
+- `Preview -> Collect` (sensor understanding)
+- `Collect -> Train` (gesture separability)
+- `Train -> Test` (confidence meaning)
+- `Test -> Portfolio` (Edge AI concept reinforcement)
 
 ## Project Structure
 
@@ -61,7 +75,7 @@ severn-edge-ai/
 │   │   ├── config.h            # Configuration, device name mapping
 │   │   ├── simple_nn.cpp/h     # Hand-written neural network engine
 │   │   ├── inference.cpp/h     # Sliding window + normalization
-│   │   ├── flash_storage.cpp/h # Model persistence in flash
+│   │   ├── flash_storage.cpp/h # RAM upload buffer + CRC/format validation
 │   │   ├── sensor_bmi270.cpp   # BMI270 IMU driver (Rev2)
 │   │   └── sensor_lsm9ds1.cpp  # LSM9DS1 IMU driver (Rev1)
 │   └── platformio.ini
@@ -69,20 +83,34 @@ severn-edge-ai/
 │   ├── src/
 │   │   ├── pages/
 │   │   │   ├── ConnectPage.tsx  # BLE device connection
+│   │   │   ├── ProjectBriefPage.tsx # Project definition before data collection
 │   │   │   ├── PreviewPage.tsx  # Sensor exploration + mini challenges
 │   │   │   ├── CollectPage.tsx  # Gesture setup + data recording
 │   │   │   ├── TrainPage.tsx    # Model training + deployment
-│   │   │   └── TestPage.tsx     # Live inference testing
+│   │   │   ├── TestPage.tsx     # Live inference testing
+│   │   │   └── PortfolioPage.tsx # Final project artifact/export
+│   │   ├── state/
+│   │   │   ├── connectionStore.ts # Connection UI state + reconnect signals
+│   │   │   └── sessionStore.ts    # Session state + persistence actions
+│   │   ├── storage/
+│   │   │   ├── db.ts              # IndexedDB stores + migration
+│   │   │   └── schema.ts          # Session/sample/journal schema
+│   │   ├── data/
+│   │   │   └── knowledgeChecks.ts # Checkpoint question bank
 │   │   ├── services/
 │   │   │   ├── bleService.ts        # BLE connection management
 │   │   │   ├── trainingService.ts   # TensorFlow.js training
 │   │   │   └── bleModelUploadService.ts # OTA model upload
+│   │   ├── badges/
+│   │   │   └── badges.ts            # Badge metadata
 │   │   └── config/
 │   │       └── constants.ts     # Shared constants (must match firmware)
 │   └── package.json
 └── docs/
     ├── CLASSROOM_GUIDE.md                    # 3-hour lesson plan
     ├── CLASSROOM_GUIDE.pdf                   # Printable teacher guide
+    ├── STUDENT_HANDOUT.md                    # One-page student worksheet
+    ├── SEVERN_EDGE_AI_COMPLETE_SPEC_V2.md    # Spec v2 implementation source of truth
     ├── Severn_Edge_AI_Classroom_Slides.pptx  # Classroom projector deck
     ├── build_slides.py                       # Rebuilds classroom slide deck
     ├── build_classroom_guide_pdf.py          # Rebuilds classroom PDF from markdown
@@ -109,6 +137,8 @@ Or run locally:
 cd web-app
 npm install
 npm run dev          # Start dev server at localhost:5173
+npm test             # Run unit tests
+npm run build        # Type-check + production build
 ```
 
 Open in **Chrome** (BLE requires Chromium). Connect to your Arduino and follow the wizard.
@@ -155,6 +185,7 @@ Flash the same firmware to all boards — each resolves its own name at boot.
 - [Classroom Guide](docs/CLASSROOM_GUIDE.md) — 3-hour lesson plan with The Swap Challenge contest
 - [Classroom Guide PDF](docs/CLASSROOM_GUIDE.pdf) — Printable teacher handout
 - [Student Handout](docs/STUDENT_HANDOUT.md) — One-page student worksheet (Preview/Train/Test first, full brief at end)
+- [Spec v2](docs/SEVERN_EDGE_AI_COMPLETE_SPEC_V2.md) — Implementation source of truth for current app architecture
 - [Classroom Slides (PPTX)](docs/Severn_Edge_AI_Classroom_Slides.pptx) — 5-slide projector deck
 - [AI Context](docs/AI_CONTEXT.md) — Complete project context for AI agents
 - [Neural Network Basics](firmware/docs/NEURAL_NETWORK_BASICS.md) — Educational explanation for students
