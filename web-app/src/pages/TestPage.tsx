@@ -31,6 +31,7 @@ const CHALLENGE_MIN_CONFIDENCE = 0.7;
 const CHALLENGE_REQUIRED_SUCCESSES = Math.ceil(
   CHALLENGE_MIN_ATTEMPTS * CHALLENGE_TARGET_SUCCESS_RATE,
 );
+const LIVE_IDLE_CONFIDENCE_THRESHOLD = 0.55;
 const ARENA_LEADERBOARD_STORAGE_KEY = 'severn-edge-ai-arena-v1';
 const ARENA_MAX_LEADERBOARD_ROWS = 200;
 
@@ -366,7 +367,20 @@ export function TestPage({
       currentPrediction < 0 ||
       currentPrediction >= labels.length
     ) {
-      setChallengeNote('No clear gesture yet. Move the board and wait for a prediction first.');
+      if (currentPrediction === labels.length) {
+        setChallengeNote(
+          `Idle detected. Perform "${target.name}" clearly, then tap Score Attempt.`,
+        );
+      } else {
+        setChallengeNote('No clear gesture yet. Move the board and wait for a prediction first.');
+      }
+      return;
+    }
+
+    if (confidence < LIVE_IDLE_CONFIDENCE_THRESHOLD) {
+      setChallengeNote(
+        `No gesture confidently detected (Idle-like). Perform "${target.name}" with a bigger, cleaner motion.`,
+      );
       return;
     }
 
@@ -459,6 +473,41 @@ export function TestPage({
 
     return 'Pick a gesture target and start scoring attempts.';
   }, [challengeComplete, challengeRows]);
+
+  const livePredictionView = useMemo(() => {
+    if (currentPrediction === null) {
+      return {
+        label: null as string | null,
+        isIdle: false,
+      };
+    }
+
+    if (currentPrediction >= 0 && currentPrediction < labels.length) {
+      if (confidence < LIVE_IDLE_CONFIDENCE_THRESHOLD) {
+        return {
+          label: 'Idle',
+          isIdle: true,
+        };
+      }
+      return {
+        label: labels[currentPrediction].name,
+        isIdle: false,
+      };
+    }
+
+    // If model has an extra class (commonly Idle), surface it instead of hiding.
+    if (currentPrediction === labels.length) {
+      return {
+        label: 'Idle',
+        isIdle: true,
+      };
+    }
+
+    return {
+      label: `Class ${currentPrediction}`,
+      isIdle: false,
+    };
+  }, [confidence, currentPrediction, labels]);
 
   const applyRecommendedSplit = async () => {
     setTestingError(null);
@@ -718,19 +767,25 @@ export function TestPage({
               />
 
               {isRunning ? (
-                currentPrediction !== null && currentPrediction < labels.length ? (
+                livePredictionView.label ? (
                   <div className="relative z-10 animate-in fade-in zoom-in duration-300">
                     <div className="text-slate-400 text-sm uppercase tracking-widest mb-4 font-bold">
-                      {useArduinoInference ? 'Arduino Says...' : 'Detected Gesture'}
+                      {livePredictionView.isIdle
+                        ? 'No Gesture (Idle)'
+                        : useArduinoInference
+                          ? 'Arduino Says...'
+                          : 'Detected Gesture'}
                     </div>
                     <div className="text-6xl md:text-7xl font-bold text-white mb-4 tracking-tight">
-                      {labels[currentPrediction].name}
+                      {livePredictionView.label}
                     </div>
 
                     <div className="inline-flex items-center gap-2 bg-slate-800/50 rounded-full px-4 py-2 backdrop-blur-sm border border-slate-700">
                       <div
                         className={`w-3 h-3 rounded-full ${
-                          confidence > 0.7
+                          livePredictionView.isIdle
+                            ? 'bg-sky-400'
+                            : confidence > 0.7
                             ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]'
                             : confidence > 0.4
                               ? 'bg-amber-500'
@@ -745,7 +800,9 @@ export function TestPage({
                     <div className="mt-8 w-64 mx-auto bg-slate-800 rounded-full h-2 overflow-hidden">
                       <div
                         className={`h-full transition-all duration-300 ${
-                          confidence > 0.7
+                          livePredictionView.isIdle
+                            ? 'bg-sky-400'
+                            : confidence > 0.7
                             ? 'bg-emerald-500'
                             : confidence > 0.4
                               ? 'bg-amber-500'
