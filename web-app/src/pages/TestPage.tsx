@@ -1,15 +1,8 @@
 /**
- * Test Page - Live Inference + Objective Model Testing
- *
- * Live Challenge:
- * - Student-facing, immediate feedback while moving the board.
- *
- * Model Testing:
- * - Edge-Impulse-style "classify all test samples" with confusion matrix
- *   and per-class metrics.
+ * Test Page - Live Inference + Objective Model Testing + Competitive Arena
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GestureLabel, Sample } from '../types';
 import { TrainingService } from '../services/trainingService';
 import type { InferenceResult } from '../types/ble';
@@ -22,6 +15,15 @@ import {
   splitSamplesByDataset,
   type ModelTestingReport,
 } from '../services/modelTestingService';
+import {
+  buildArenaBenchmarks,
+  createArenaSubmission,
+  evaluateArenaBenchmarks,
+  mergeArenaSubmissions,
+  rankArenaSubmissions,
+  type ArenaSubmission,
+  type ArenaRunResult,
+} from '../services/modelArenaService';
 
 const CHALLENGE_MIN_ATTEMPTS = 10;
 const CHALLENGE_TARGET_SUCCESS_RATE = 0.8;
@@ -29,8 +31,10 @@ const CHALLENGE_MIN_CONFIDENCE = 0.7;
 const CHALLENGE_REQUIRED_SUCCESSES = Math.ceil(
   CHALLENGE_MIN_ATTEMPTS * CHALLENGE_TARGET_SUCCESS_RATE,
 );
+const ARENA_LEADERBOARD_STORAGE_KEY = 'severn-edge-ai-arena-v1';
+const ARENA_MAX_LEADERBOARD_ROWS = 200;
 
-type TestingMode = 'live' | 'model-testing';
+type TestingMode = 'live' | 'model-testing' | 'arena';
 
 interface ChallengeStats {
   attempts: number;
@@ -62,6 +66,10 @@ function formatPercent(value: number, digits = 1): string {
   return `${(value * 100).toFixed(digits)}%`;
 }
 
+function formatDateTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleString();
+}
+
 function buildCountsByLabel(
   samples: Sample[],
   labels: GestureLabel[],
@@ -74,6 +82,54 @@ function buildCountsByLabel(
     counts.set(sample.label, (counts.get(sample.label) ?? 0) + 1);
   }
   return counts;
+}
+
+function parseArenaSubmissions(payload: unknown): ArenaSubmission[] {
+  let rows: unknown[] = [];
+  if (Array.isArray(payload)) {
+    rows = payload;
+  } else if (
+    payload &&
+    typeof payload === 'object' &&
+    Array.isArray((payload as { submissions?: unknown[] }).submissions)
+  ) {
+    rows = (payload as { submissions: unknown[] }).submissions;
+  }
+
+  const parsed: ArenaSubmission[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const candidate = row as Partial<ArenaSubmission>;
+    if (
+      typeof candidate.id !== 'string' ||
+      typeof candidate.studentName !== 'string' ||
+      typeof candidate.projectName !== 'string' ||
+      typeof candidate.createdAt !== 'number' ||
+      !Array.isArray(candidate.labels) ||
+      typeof candidate.totalBenchmarks !== 'number' ||
+      typeof candidate.overallAccuracy !== 'number' ||
+      typeof candidate.generalizationAccuracy !== 'number' ||
+      typeof candidate.genericAccuracy !== 'number' ||
+      typeof candidate.arenaScore !== 'number'
+    ) {
+      continue;
+    }
+
+    parsed.push({
+      id: candidate.id,
+      studentName: candidate.studentName,
+      projectName: candidate.projectName,
+      createdAt: candidate.createdAt,
+      labels: candidate.labels.filter((entry): entry is string => typeof entry === 'string'),
+      totalBenchmarks: candidate.totalBenchmarks,
+      overallAccuracy: candidate.overallAccuracy,
+      generalizationAccuracy: candidate.generalizationAccuracy,
+      genericAccuracy: candidate.genericAccuracy,
+      arenaScore: candidate.arenaScore,
+    });
+  }
+
+  return parsed;
 }
 
 interface TestPageProps {
@@ -113,6 +169,15 @@ export function TestPage({
   const [testingInfo, setTestingInfo] = useState<string | null>(null);
   const [report, setReport] = useState<ModelTestingReport | null>(null);
 
+  // Arena state
+  const [isRunningArena, setIsRunningArena] = useState(false);
+  const [arenaError, setArenaError] = useState<string | null>(null);
+  const [arenaInfo, setArenaInfo] = useState<string | null>(null);
+  const [arenaResult, setArenaResult] = useState<ArenaRunResult | null>(null);
+  const [arenaSubmissions, setArenaSubmissions] = useState<ArenaSubmission[]>([]);
+  const arenaImportRef = useRef<HTMLInputElement | null>(null);
+
+  const session = useSessionStore((state) => state.session);
   const sessionSamples = useSessionStore((state) => state.samples);
   const setSessionSamples = useSessionStore((state) => state.setSamples);
   const addBadge = useSessionStore((state) => state.addBadge);
@@ -130,11 +195,46 @@ export function TestPage({
     [labels, testingSamples],
   );
 
+  const arenaBenchmarks = useMemo(
+    () => buildArenaBenchmarks(labels, trainingSamples, testingSamples),
+    [labels, testingSamples, trainingSamples],
+  );
+  const arenaBenchmarkSummary = useMemo(() => {
+    const summary = {
+      holdout: 0,
+      generic: 0,
+      total: arenaBenchmarks.length,
+    };
+    for (const benchmark of arenaBenchmarks) {
+      if (benchmark.track === 'holdout') {
+        summary.holdout += 1;
+      } else {
+        summary.generic += 1;
+      }
+    }
+    return summary;
+  }, [arenaBenchmarks]);
+  const rankedArenaSubmissions = useMemo(
+    () => rankArenaSubmissions(arenaSubmissions),
+    [arenaSubmissions],
+  );
+
   useEffect(() => {
     return () => {
       const ble = getBLEService();
       void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
     };
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ARENA_LEADERBOARD_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = parseArenaSubmissions(JSON.parse(raw));
+      setArenaSubmissions(rankArenaSubmissions(parsed).slice(0, ARENA_MAX_LEADERBOARD_ROWS));
+    } catch (err) {
+      console.error('Failed to load arena leaderboard:', err);
+    }
   }, []);
 
   useEffect(() => {
@@ -155,10 +255,11 @@ export function TestPage({
 
   useEffect(() => {
     setReport(null);
-  }, [sessionSamples, labels]);
+    setArenaResult(null);
+  }, [labels, sessionSamples]);
 
   useEffect(() => {
-    if (mode !== 'model-testing' || !isRunning) {
+    if (mode === 'live' || !isRunning) {
       return;
     }
 
@@ -166,6 +267,16 @@ export function TestPage({
     void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
     setIsRunning(false);
   }, [isRunning, mode]);
+
+  const persistArenaSubmissions = (next: ArenaSubmission[]) => {
+    const trimmed = rankArenaSubmissions(next).slice(0, ARENA_MAX_LEADERBOARD_ROWS);
+    setArenaSubmissions(trimmed);
+    try {
+      localStorage.setItem(ARENA_LEADERBOARD_STORAGE_KEY, JSON.stringify(trimmed));
+    } catch (err) {
+      console.error('Failed to persist arena leaderboard:', err);
+    }
+  };
 
   const startTesting = async () => {
     const ble = getBLEService();
@@ -444,6 +555,125 @@ export function TestPage({
         err instanceof Error ? err.message : 'Failed to move failed samples.',
       );
     }
+  };
+
+  const runArenaBenchmark = () => {
+    setArenaError(null);
+    setArenaInfo(null);
+
+    if (arenaBenchmarks.length === 0) {
+      setArenaError(
+        'No arena benchmark set available. Create test split data and keep some train samples first.',
+      );
+      return;
+    }
+
+    setIsRunningArena(true);
+    try {
+      const result = evaluateArenaBenchmarks(
+        arenaBenchmarks,
+        labels,
+        (sampleData) => trainingService.predict(sampleData),
+      );
+      setArenaResult(result);
+      setArenaInfo(
+        `Arena run complete: ${result.correct}/${result.total} correct, score ${formatPercent(result.arenaScore)}.`,
+      );
+    } catch (err) {
+      console.error('Arena benchmark failed:', err);
+      setArenaError(
+        err instanceof Error ? err.message : 'Failed to run arena benchmark.',
+      );
+      setArenaResult(null);
+    } finally {
+      setIsRunningArena(false);
+    }
+  };
+
+  const submitArenaScore = () => {
+    if (!arenaResult) {
+      setArenaError('Run arena benchmark first.');
+      return;
+    }
+
+    const studentName = session?.projectBrief?.studentName?.trim()
+      || session?.studentDisplayName?.trim()
+      || 'Student';
+    const projectName = session?.projectBrief?.name?.trim() || 'Unnamed Project';
+
+    const submission = createArenaSubmission({
+      studentName,
+      projectName,
+      labels,
+      result: arenaResult,
+    });
+    const merged = mergeArenaSubmissions(arenaSubmissions, [submission]);
+    persistArenaSubmissions(merged);
+    setArenaInfo(
+      `Submitted to leaderboard for ${studentName}. Rank updates immediately on this device.`,
+    );
+  };
+
+  const exportArenaLeaderboard = () => {
+    try {
+      const payload = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        submissions: rankArenaSubmissions(arenaSubmissions),
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `severn-edge-ai-arena-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setArenaInfo('Exported leaderboard JSON.');
+      setArenaError(null);
+    } catch (err) {
+      console.error('Export failed:', err);
+      setArenaError('Failed to export leaderboard.');
+    }
+  };
+
+  const triggerArenaImport = () => {
+    arenaImportRef.current?.click();
+  };
+
+  const importArenaLeaderboard = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = parseArenaSubmissions(JSON.parse(text));
+      if (parsed.length === 0) {
+        setArenaError('No valid submissions found in selected JSON.');
+        setArenaInfo(null);
+        return;
+      }
+
+      const merged = mergeArenaSubmissions(arenaSubmissions, parsed);
+      persistArenaSubmissions(merged);
+      setArenaInfo(`Imported ${parsed.length} submissions.`);
+      setArenaError(null);
+    } catch (err) {
+      console.error('Import failed:', err);
+      setArenaError('Failed to import leaderboard JSON.');
+      setArenaInfo(null);
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const clearArenaLeaderboard = () => {
+    persistArenaSubmissions([]);
+    setArenaInfo('Cleared leaderboard on this device.');
+    setArenaError(null);
   };
 
   const renderLiveChallenge = () => {
@@ -1064,6 +1294,268 @@ export function TestPage({
     );
   };
 
+  const renderArena = () => {
+    const waveLabelScore = arenaResult?.labelScores.find((labelScore) =>
+      labelScore.labelName.toLowerCase().includes('wave'),
+    );
+
+    return (
+      <div className="space-y-6">
+        <div className="card bg-gradient-to-br from-violet-50 to-white border border-violet-200">
+          <h2 className="heading-md mb-2">🏆 Model Arena</h2>
+          <p className="text-slate-700">
+            Competitive benchmark mode. Everyone is scored using the same hidden holdout
+            and generic gesture tests. Higher score means better generalization.
+          </p>
+        </div>
+
+        <div className="card">
+          <h3 className="font-bold text-slate-800 mb-3">Arena Benchmark Pool</h3>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+            <div className="rounded-xl border border-violet-200 bg-violet-50 p-3">
+              <div className="text-xs uppercase tracking-wide text-violet-700">Total Benchmarks</div>
+              <div className="text-2xl font-bold text-violet-800">{arenaBenchmarkSummary.total}</div>
+            </div>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+              <div className="text-xs uppercase tracking-wide text-emerald-700">Holdout Cases</div>
+              <div className="text-2xl font-bold text-emerald-800">{arenaBenchmarkSummary.holdout}</div>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <div className="text-xs uppercase tracking-wide text-amber-700">Generic Cases</div>
+              <div className="text-2xl font-bold text-amber-800">{arenaBenchmarkSummary.generic}</div>
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+              <div className="text-xs uppercase tracking-wide text-blue-700">Competing Models</div>
+              <div className="text-2xl font-bold text-blue-800">{rankedArenaSubmissions.length}</div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-500 border-b border-slate-200">
+                  <th className="py-2 pr-4">Gesture</th>
+                  <th className="py-2 pr-4">Train</th>
+                  <th className="py-2 pr-4">Test</th>
+                  <th className="py-2 pr-4">Generic Benchmarks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {labels.map((label) => {
+                  const genericCount = arenaBenchmarks.filter(
+                    (item) => item.track === 'generic' && item.expectedLabelId === label.id,
+                  ).length;
+                  return (
+                    <tr key={label.id} className="border-b border-slate-100 text-slate-700">
+                      <td className="py-2 pr-4 font-medium">{label.name}</td>
+                      <td className="py-2 pr-4">{trainingCountsByLabel.get(label.id) ?? 0}</td>
+                      <td className="py-2 pr-4">{testingCountsByLabel.get(label.id) ?? 0}</td>
+                      <td className="py-2 pr-4">{genericCount}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              onClick={runArenaBenchmark}
+              disabled={isRunningArena || arenaBenchmarkSummary.total === 0}
+              className="btn-primary disabled:opacity-50"
+            >
+              {isRunningArena ? 'Running Arena...' : 'Run Arena Benchmark'}
+            </button>
+            <button
+              onClick={submitArenaScore}
+              disabled={!arenaResult}
+              className="btn-secondary bg-violet-100 hover:bg-violet-200 border-violet-300 text-violet-900 disabled:opacity-50"
+            >
+              Submit Score to Leaderboard
+            </button>
+          </div>
+
+          {arenaError && (
+            <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+              {arenaError}
+            </div>
+          )}
+          {arenaInfo && (
+            <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+              {arenaInfo}
+            </div>
+          )}
+        </div>
+
+        {arenaResult && (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="rounded-2xl border border-violet-300 bg-violet-50 p-4">
+                <div className="text-xs uppercase tracking-wide text-violet-700">Arena Score</div>
+                <div className="text-3xl font-bold text-violet-800">
+                  {formatPercent(arenaResult.arenaScore)}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <div className="text-xs uppercase tracking-wide text-emerald-700">Generalization</div>
+                <div className="text-3xl font-bold text-emerald-800">
+                  {formatPercent(arenaResult.generalizationAccuracy)}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="text-xs uppercase tracking-wide text-amber-700">Generic Gesture</div>
+                <div className="text-3xl font-bold text-amber-800">
+                  {formatPercent(arenaResult.genericAccuracy)}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs uppercase tracking-wide text-slate-500">Benchmarks</div>
+                <div className="text-3xl font-bold text-slate-700">
+                  {arenaResult.correct}/{arenaResult.total}
+                </div>
+              </div>
+            </div>
+
+            {waveLabelScore && waveLabelScore.genericTotal > 0 && (
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <h3 className="font-bold text-blue-900 mb-1">Generic Wave Benchmark</h3>
+                <p className="text-sm text-blue-800">
+                  Your model scored {formatPercent(waveLabelScore.genericAccuracy)} on generic
+                  &quot;{waveLabelScore.labelName}&quot; patterns ({waveLabelScore.genericCorrect}/
+                  {waveLabelScore.genericTotal}).
+                </p>
+              </div>
+            )}
+
+            <div className="card">
+              <h3 className="font-bold text-slate-800 mb-3">Per-Gesture Arena Results</h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-500 border-b border-slate-200">
+                      <th className="py-2 pr-4">Gesture</th>
+                      <th className="py-2 pr-4">All Benchmarks</th>
+                      <th className="py-2 pr-4">Generic Score</th>
+                      <th className="py-2 pr-4">Coverage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {arenaResult.labelScores.map((labelScore) => (
+                      <tr key={labelScore.labelId} className="border-b border-slate-100 text-slate-700">
+                        <td className="py-2 pr-4 font-medium">{labelScore.labelName}</td>
+                        <td className="py-2 pr-4">{formatPercent(labelScore.accuracy)}</td>
+                        <td className="py-2 pr-4">
+                          {labelScore.genericTotal > 0
+                            ? formatPercent(labelScore.genericAccuracy)
+                            : 'N/A'}
+                        </td>
+                        <td className="py-2 pr-4">{labelScore.correct}/{labelScore.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="card">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h3 className="font-bold text-slate-800">Class Leaderboard</h3>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={exportArenaLeaderboard}
+                className="btn-secondary bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800"
+              >
+                Export JSON
+              </button>
+              <button
+                onClick={triggerArenaImport}
+                className="btn-secondary bg-slate-100 hover:bg-slate-200 border-slate-300 text-slate-800"
+              >
+                Import JSON
+              </button>
+              <button
+                onClick={clearArenaLeaderboard}
+                className="btn-secondary bg-rose-100 hover:bg-rose-200 border-rose-300 text-rose-700"
+              >
+                Clear Leaderboard
+              </button>
+              <input
+                ref={arenaImportRef}
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={(event) => {
+                  void importArenaLeaderboard(event);
+                }}
+              />
+            </div>
+          </div>
+
+          {rankedArenaSubmissions.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-slate-500 text-sm">
+              No submissions yet. Run arena benchmark and submit scores to start the competition.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-slate-500 border-b border-slate-200">
+                    <th className="py-2 pr-4">Rank</th>
+                    <th className="py-2 pr-4">Student</th>
+                    <th className="py-2 pr-4">Project</th>
+                    <th className="py-2 pr-4">Arena Score</th>
+                    <th className="py-2 pr-4">Generalization</th>
+                    <th className="py-2 pr-4">Generic</th>
+                    <th className="py-2 pr-4">Submitted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rankedArenaSubmissions.map((submission, index) => (
+                    <tr key={submission.id} className="border-b border-slate-100 text-slate-700">
+                      <td className="py-2 pr-4 font-bold">#{index + 1}</td>
+                      <td className="py-2 pr-4">{submission.studentName}</td>
+                      <td className="py-2 pr-4">{submission.projectName}</td>
+                      <td className="py-2 pr-4 font-semibold text-violet-700">
+                        {formatPercent(submission.arenaScore)}
+                      </td>
+                      <td className="py-2 pr-4">{formatPercent(submission.generalizationAccuracy)}</td>
+                      <td className="py-2 pr-4">{formatPercent(submission.genericAccuracy)}</td>
+                      <td className="py-2 pr-4 text-xs text-slate-500">
+                        {formatDateTime(submission.createdAt)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          {onOpenPortfolio && (
+            <button
+              onClick={onOpenPortfolio}
+              className="w-full bg-primary-50 hover:bg-primary-100 text-primary-700 font-bold py-3 px-6 rounded-xl transition-colors border border-primary-200"
+            >
+              Open Portfolio
+            </button>
+          )}
+          {onStartOver && (
+            <button
+              onClick={onStartOver}
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-6 rounded-xl transition-colors border border-slate-200 flex items-center justify-center gap-2"
+            >
+              <span>🏠</span>
+              <span>Start Over</span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="p-4 max-w-5xl mx-auto space-y-6">
       <div className="card bg-white border border-slate-200">
@@ -1088,10 +1580,22 @@ export function TestPage({
           >
             Model Testing
           </button>
+          <button
+            onClick={() => setMode('arena')}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
+              mode === 'arena'
+                ? 'bg-primary-600 text-white'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            Model Arena
+          </button>
         </div>
       </div>
 
-      {mode === 'live' ? renderLiveChallenge() : renderModelTesting()}
+      {mode === 'live' && renderLiveChallenge()}
+      {mode === 'model-testing' && renderModelTesting()}
+      {mode === 'arena' && renderArena()}
     </div>
   );
 }
