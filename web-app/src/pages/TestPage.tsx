@@ -2,7 +2,7 @@
  * Test Page - Live Inference + Objective Model Testing + Competitive Arena
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GestureLabel, Sample } from '../types';
 import { TrainingService } from '../services/trainingService';
 import type { InferenceResult } from '../types/ble';
@@ -34,10 +34,11 @@ const CHALLENGE_REQUIRED_SUCCESSES = Math.ceil(
 const LIVE_IDLE_CONFIDENCE_THRESHOLD = 0.55;
 const ARENA_LEADERBOARD_STORAGE_KEY = 'severn-edge-ai-arena-v1';
 const ARENA_MAX_LEADERBOARD_ROWS = 200;
-const HOLD_CAPTURE_MIN_MS = 1200;
-const HOLD_CAPTURE_MIN_FRAMES = 8;
-const HOLD_CAPTURE_SUPPORT_THRESHOLD = 0.6;
-const HOLD_CAPTURE_BUFFER_MS = 20000;
+const TIMED_CAPTURE_PREP_MS = 1200;
+const TIMED_CAPTURE_WINDOW_MS = 2000;
+const TIMED_CAPTURE_MIN_FRAMES = 8;
+const TIMED_CAPTURE_SUPPORT_THRESHOLD = 0.6;
+const INFERENCE_FRAME_BUFFER_MS = 20000;
 
 type TestingMode = 'live' | 'model-testing' | 'arena';
 
@@ -176,8 +177,8 @@ export function TestPage({
   const [showDistribution, setShowDistribution] = useState(false);
   const [targetGestureIndex, setTargetGestureIndex] = useState(0);
   const [challengeNote, setChallengeNote] = useState<string | null>(null);
-  const [isHoldingAttempt, setIsHoldingAttempt] = useState(false);
-  const [holdDurationMs, setHoldDurationMs] = useState(0);
+  const [capturePhase, setCapturePhase] = useState<'idle' | 'prep' | 'capturing'>('idle');
+  const [captureMsRemaining, setCaptureMsRemaining] = useState(0);
   const [challengeStats, setChallengeStats] = useState<Record<string, ChallengeStats>>(
     () => createInitialChallengeStats(labels),
   );
@@ -196,8 +197,12 @@ export function TestPage({
   const [arenaResult, setArenaResult] = useState<ArenaRunResult | null>(null);
   const [arenaSubmissions, setArenaSubmissions] = useState<ArenaSubmission[]>([]);
   const arenaImportRef = useRef<HTMLInputElement | null>(null);
-  const holdStartRef = useRef<number | null>(null);
-  const holdTargetIndexRef = useRef<number | null>(null);
+  const captureRunIdRef = useRef(0);
+  const capturePhaseStartedAtRef = useRef<number | null>(null);
+  const captureTargetIndexRef = useRef<number | null>(null);
+  const captureWindowStartRef = useRef<number | null>(null);
+  const capturePrepTimerRef = useRef<number | null>(null);
+  const captureScoreTimerRef = useRef<number | null>(null);
   const inferenceFramesRef = useRef<InferenceFrame[]>([]);
 
   const session = useSessionStore((state) => state.session);
@@ -314,12 +319,36 @@ export function TestPage({
     [arenaSubmissions],
   );
 
+  const clearTimedCaptureTimers = useCallback(() => {
+    if (capturePrepTimerRef.current !== null) {
+      window.clearTimeout(capturePrepTimerRef.current);
+      capturePrepTimerRef.current = null;
+    }
+    if (captureScoreTimerRef.current !== null) {
+      window.clearTimeout(captureScoreTimerRef.current);
+      captureScoreTimerRef.current = null;
+    }
+  }, []);
+
+  const clearTimedCapture = useCallback((invalidateRun = true) => {
+    clearTimedCaptureTimers();
+    if (invalidateRun) {
+      captureRunIdRef.current += 1;
+    }
+    capturePhaseStartedAtRef.current = null;
+    captureTargetIndexRef.current = null;
+    captureWindowStartRef.current = null;
+    setCapturePhase('idle');
+    setCaptureMsRemaining(0);
+  }, [clearTimedCaptureTimers]);
+
   useEffect(() => {
     return () => {
+      clearTimedCaptureTimers();
       const ble = getBLEService();
       void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
     };
-  }, []);
+  }, [clearTimedCaptureTimers]);
 
   useEffect(() => {
     try {
@@ -361,30 +390,33 @@ export function TestPage({
     const ble = getBLEService();
     void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
     setIsRunning(false);
-    setIsHoldingAttempt(false);
-    holdStartRef.current = null;
-    holdTargetIndexRef.current = null;
-    setHoldDurationMs(0);
-  }, [isRunning, mode]);
+    clearTimedCapture();
+  }, [clearTimedCapture, isRunning, mode]);
 
   useEffect(() => {
-    if (!isHoldingAttempt) {
-      setHoldDurationMs(0);
+    if (capturePhase === 'idle') {
+      setCaptureMsRemaining(0);
       return;
     }
 
+    const totalMs =
+      capturePhase === 'prep' ? TIMED_CAPTURE_PREP_MS : TIMED_CAPTURE_WINDOW_MS;
+
+    const tick = () => {
+      if (capturePhaseStartedAtRef.current === null) return;
+      const elapsed = Date.now() - capturePhaseStartedAtRef.current;
+      setCaptureMsRemaining(Math.max(0, totalMs - elapsed));
+    };
+
+    tick();
     const timer = window.setInterval(() => {
-      if (holdStartRef.current === null) {
-        setHoldDurationMs(0);
-        return;
-      }
-      setHoldDurationMs(Date.now() - holdStartRef.current);
+      tick();
     }, 100);
 
     return () => {
       window.clearInterval(timer);
     };
-  }, [isHoldingAttempt]);
+  }, [capturePhase]);
 
   const persistArenaSubmissions = (next: ArenaSubmission[]) => {
     const trimmed = rankArenaSubmissions(next).slice(0, ARENA_MAX_LEADERBOARD_ROWS);
@@ -404,7 +436,10 @@ export function TestPage({
     };
     const frames = inferenceFramesRef.current;
     frames.push(frame);
-    while (frames.length > 0 && frame.timestamp - frames[0].timestamp > HOLD_CAPTURE_BUFFER_MS) {
+    while (
+      frames.length > 0
+      && frame.timestamp - frames[0].timestamp > INFERENCE_FRAME_BUFFER_MS
+    ) {
       frames.shift();
     }
   };
@@ -415,10 +450,7 @@ export function TestPage({
     setChallengeNote(null);
     setCurrentPrediction(null);
     setConfidence(0);
-    setIsHoldingAttempt(false);
-    holdStartRef.current = null;
-    holdTargetIndexRef.current = null;
-    setHoldDurationMs(0);
+    clearTimedCapture();
     inferenceFramesRef.current = [];
     setIsRunning(true);
 
@@ -464,6 +496,7 @@ export function TestPage({
       }
     } catch (err) {
       setIsRunning(false);
+      clearTimedCapture();
       console.error('Start testing failed:', err);
       setLiveError(
         err instanceof Error
@@ -488,64 +521,24 @@ export function TestPage({
       );
     } finally {
       setIsRunning(false);
-      setIsHoldingAttempt(false);
-      holdStartRef.current = null;
-      holdTargetIndexRef.current = null;
-      setHoldDurationMs(0);
+      clearTimedCapture();
     }
   };
 
-  const beginHoldAttempt = () => {
-    const target = labels[targetGestureIndex];
-    if (!target) return;
-
-    if (!isRunning) {
-      setChallengeNote('Press Start Testing first, then hold to capture your gesture attempt.');
-      return;
-    }
-
-    if (isHoldingAttempt) {
-      return;
-    }
-
-    holdStartRef.current = Date.now();
-    holdTargetIndexRef.current = targetGestureIndex;
-    setHoldDurationMs(0);
-    setIsHoldingAttempt(true);
-    setChallengeNote(`Capturing "${target.name}"... keep moving, then release to score.`);
-  };
-
-  const endHoldAttempt = () => {
-    if (!isHoldingAttempt) {
-      return;
-    }
-
-    const targetIndex =
-      holdTargetIndexRef.current !== null ? holdTargetIndexRef.current : targetGestureIndex;
+  const evaluateCaptureWindow = (
+    startedAt: number,
+    endedAt: number,
+    targetIndex: number,
+  ) => {
     const target = labels[targetIndex];
-    const startedAt = holdStartRef.current;
-    holdStartRef.current = null;
-    holdTargetIndexRef.current = null;
-    setIsHoldingAttempt(false);
-    if (!target || !startedAt) {
-      return;
-    }
-
-    const endedAt = Date.now();
-    const durationMs = endedAt - startedAt;
-    if (durationMs < HOLD_CAPTURE_MIN_MS) {
-      setChallengeNote(
-        `Hold too short (${(durationMs / 1000).toFixed(1)}s). Hold for at least ${(HOLD_CAPTURE_MIN_MS / 1000).toFixed(1)}s.`,
-      );
-      return;
-    }
+    if (!target) return;
 
     const capturedFrames = inferenceFramesRef.current.filter(
       (frame) => frame.timestamp >= startedAt && frame.timestamp <= endedAt,
     );
-    if (capturedFrames.length < HOLD_CAPTURE_MIN_FRAMES) {
+    if (capturedFrames.length < TIMED_CAPTURE_MIN_FRAMES) {
       setChallengeNote(
-        `Not enough signal in capture window (${capturedFrames.length} frames). Try a bigger, clearer motion.`,
+        `Not enough signal in timed capture (${capturedFrames.length} frames). Try a bigger, cleaner gesture.`,
       );
       return;
     }
@@ -591,7 +584,7 @@ export function TestPage({
         : 'Idle';
 
     const isCorrectGesture = bestLabelIndex === targetIndex;
-    const hasSupport = support >= HOLD_CAPTURE_SUPPORT_THRESHOLD;
+    const hasSupport = support >= TIMED_CAPTURE_SUPPORT_THRESHOLD;
     const isConfident = avgConfidence >= CHALLENGE_MIN_CONFIDENCE;
     const isSuccess =
       isCorrectGesture
@@ -612,14 +605,14 @@ export function TestPage({
 
     if (isSuccess) {
       setChallengeNote(
-        `Great capture. "${target.name}" won ${formatPercent(support, 0)} of frames at ${formatPercent(avgConfidence, 0)} confidence.`,
+        `Great capture. "${target.name}" won ${formatPercent(support, 0)} of the timed window at ${formatPercent(avgConfidence, 0)} confidence.`,
       );
       return;
     }
 
     if (idleRatio >= 0.7) {
       setChallengeNote(
-        `Mostly idle during capture (${formatPercent(idleRatio, 0)}). Repeat "${target.name}" with a larger motion.`,
+        `Mostly idle during timed capture (${formatPercent(idleRatio, 0)}). Repeat "${target.name}" with a larger motion.`,
       );
       return;
     }
@@ -633,7 +626,7 @@ export function TestPage({
 
     if (!hasSupport) {
       setChallengeNote(
-        `Mixed capture for "${target.name}" (${formatPercent(support, 0)} support). Keep the gesture shape steady for the whole hold.`,
+        `Mixed capture for "${target.name}" (${formatPercent(support, 0)} support). Keep gesture shape steady during the whole timed window.`,
       );
       return;
     }
@@ -643,11 +636,58 @@ export function TestPage({
     );
   };
 
+  const startTimedCapture = () => {
+    const target = labels[targetGestureIndex];
+    if (!target) return;
+
+    if (!isRunning) {
+      setChallengeNote('Press Start Testing first, then run a timed capture.');
+      return;
+    }
+
+    if (capturePhase !== 'idle') {
+      return;
+    }
+
+    const runId = captureRunIdRef.current + 1;
+    captureRunIdRef.current = runId;
+    captureTargetIndexRef.current = targetGestureIndex;
+    captureWindowStartRef.current = null;
+    capturePhaseStartedAtRef.current = Date.now();
+    setCapturePhase('prep');
+    setCaptureMsRemaining(TIMED_CAPTURE_PREP_MS);
+    setChallengeNote(`Get ready for "${target.name}"...`);
+
+    clearTimedCaptureTimers();
+    capturePrepTimerRef.current = window.setTimeout(() => {
+      if (captureRunIdRef.current !== runId) return;
+
+      capturePhaseStartedAtRef.current = Date.now();
+      captureWindowStartRef.current = capturePhaseStartedAtRef.current;
+      setCapturePhase('capturing');
+      setCaptureMsRemaining(TIMED_CAPTURE_WINDOW_MS);
+      setChallengeNote(`Perform "${target.name}" now!`);
+
+      captureScoreTimerRef.current = window.setTimeout(() => {
+        if (captureRunIdRef.current !== runId) return;
+
+        const windowStart = captureWindowStartRef.current;
+        const lockedTargetIndex = captureTargetIndexRef.current ?? targetGestureIndex;
+        clearTimedCapture(false);
+        if (windowStart === null) return;
+        evaluateCaptureWindow(windowStart, Date.now(), lockedTargetIndex);
+      }, TIMED_CAPTURE_WINDOW_MS);
+    }, TIMED_CAPTURE_PREP_MS);
+  };
+
+  const cancelTimedCapture = () => {
+    if (capturePhase === 'idle') return;
+    clearTimedCapture();
+    setChallengeNote('Timed capture canceled.');
+  };
+
   const resetChallenge = () => {
-    holdStartRef.current = null;
-    holdTargetIndexRef.current = null;
-    setIsHoldingAttempt(false);
-    setHoldDurationMs(0);
+    clearTimedCapture();
     setChallengeStats(createInitialChallengeStats(labels));
     setChallengeNote(null);
   };
@@ -696,10 +736,10 @@ export function TestPage({
       .filter((row) => row.attempts > 0 && row.attempts < CHALLENGE_MIN_ATTEMPTS)
       .map((row) => row.label.name);
     if (inProgress.length > 0) {
-      return `Keep capturing hold attempts for: ${inProgress.join(', ')}.`;
+      return `Keep running timed captures for: ${inProgress.join(', ')}.`;
     }
 
-    return 'Pick a gesture target, hold the capture button while moving, then release to score.';
+    return 'Pick a gesture target and run a timed capture.';
   }, [challengeComplete, challengeRows]);
 
   const livePredictionView = useMemo(() => {
@@ -1096,7 +1136,7 @@ export function TestPage({
             </h3>
             <p className="text-sm text-amber-800">
               For each gesture, reach at least {CHALLENGE_REQUIRED_SUCCESSES} successful
-              attempts out of {CHALLENGE_MIN_ATTEMPTS} hold captures.
+              attempts out of {CHALLENGE_MIN_ATTEMPTS} timed captures.
             </p>
 
             <div className="mt-3 flex flex-wrap gap-2">
@@ -1151,24 +1191,31 @@ export function TestPage({
 
             <div className="mt-4 space-y-2">
               <button
-                onPointerDown={beginHoldAttempt}
-                onPointerUp={endHoldAttempt}
-                onPointerLeave={endHoldAttempt}
-                onPointerCancel={endHoldAttempt}
+                onClick={startTimedCapture}
                 className="w-full rounded-xl bg-primary-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                disabled={!activeTarget}
+                disabled={!activeTarget || !isRunning || capturePhase !== 'idle'}
               >
                 {!activeTarget
                   ? 'Choose a Gesture Target'
                   : !isRunning
                   ? 'Start Testing First'
-                  : isHoldingAttempt
-                  ? `Release to Score "${activeTarget.name}" (${(holdDurationMs / 1000).toFixed(1)}s)`
-                  : `Hold to Capture "${activeTarget.name}"`}
+                  : capturePhase === 'prep'
+                  ? `Get Ready... ${Math.max(1, Math.ceil(captureMsRemaining / 1000))}s`
+                  : capturePhase === 'capturing'
+                  ? `Capturing... ${(captureMsRemaining / 1000).toFixed(1)}s`
+                  : `Run Timed Capture for "${activeTarget.name}"`}
               </button>
+              {capturePhase !== 'idle' && (
+                <button
+                  onClick={cancelTimedCapture}
+                  className="w-full rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100"
+                >
+                  Cancel Timed Capture
+                </button>
+              )}
               <p className="text-xs text-slate-500">
-                Hold while performing the target gesture, then release. The score uses all
-                predictions in that capture window, not a single instant.
+                One tap runs a fixed get-ready + capture sequence, then auto-scores from the
+                whole capture window.
               </p>
               <button
                 onClick={resetChallenge}
@@ -1260,7 +1307,7 @@ export function TestPage({
             </h3>
             <p className="text-sm text-blue-800 mb-3">{challengeCoachText}</p>
             <ul className="space-y-2 text-sm text-blue-800">
-              <li>Hold the capture button while you do the target gesture, then release to score.</li>
+              <li>Tap once to run timed capture: ready phase, perform phase, then auto-score.</li>
               <li>Hold the Arduino the same way you did during training.</li>
               <li>Use consistent speed and range for each gesture.</li>
               <li>Green confidence bar usually means cleaner class separation.</li>
