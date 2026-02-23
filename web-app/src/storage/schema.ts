@@ -43,6 +43,9 @@ export interface SessionMeta {
   checkpointIds: CheckpointId[];
   currentStage: AppStage;
   trainingAccuracy: number | null;
+  dataRevision: number;
+  lastTrainedDataRevision: number | null;
+  lockedTestSampleIds: string[];
   lastDeviceName: string | null;
   overrideUsedAt: number[];
 }

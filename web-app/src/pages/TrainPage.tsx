@@ -37,7 +37,7 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
   const [trainingService] = useState(() => new TrainingService());
   const [hasModel, setHasModel] = useState(false);
   const [trainingCount, setTrainingCount] = useState(0);
-  const { setTrainingAccuracy, addBadge } = useSessionStore();
+  const { setTrainingAccuracy, addBadge, recordTrainingSnapshot } = useSessionStore();
 
   const trainingSamples = useMemo(
     () => samples.filter((sample) => sample.split !== 'test'),
@@ -106,6 +106,7 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
 
       setAccuracy(result.accuracy);
       setTrainingAccuracy(result.accuracy);
+      recordTrainingSnapshot(testSamples.map((sample) => sample.id));
       if (result.accuracy >= 0.8) {
         addBadge('ai-trainer');
       }
@@ -135,6 +136,7 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
 
       setAccuracy(result.accuracy);
       setTrainingAccuracy(result.accuracy);
+      recordTrainingSnapshot(testSamples.map((sample) => sample.id));
       if (result.accuracy >= 0.8) {
         addBadge('ai-trainer');
       }

@@ -118,6 +118,12 @@ function SensorPeek({ packet }: { packet: number[] | null }) {
 
 interface CollectPageProps {
   onComplete: (samples: Sample[], labels: GestureLabel[]) => void;
+  initialLabels?: GestureLabel[];
+  initialSamples?: Sample[];
+  targetSplit?: 'train' | 'test';
+  appendMode?: boolean;
+  requiredSamplesPerGesture?: number;
+  onCancel?: () => void;
 }
 
 function getTimestampMs(): number {
@@ -128,23 +134,77 @@ function makeClientId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-export function CollectPage({ onComplete }: CollectPageProps) {
-  const [labels, setLabels] = useState<GestureLabel[]>(
-    COLLECTION_CONFIG.DEFAULT_GESTURES.map((name, idx) => ({
-      id: `label-${idx}`,
-      name,
-      sampleCount: 0,
-    }))
-  );
+function cloneSample(sample: Sample): Sample {
+  return {
+    ...sample,
+    data: sample.data.map((row) => [...row]),
+    split: sample.split === 'test' ? 'test' : 'train',
+  };
+}
 
-  const [samples, setSamples] = useState<Sample[]>([]);
+function countSamplesForLabel(
+  samples: Sample[],
+  labelId: string,
+  targetSplit: 'train' | 'test',
+): number {
+  return samples.reduce((count, sample) => {
+    if (sample.label !== labelId) {
+      return count;
+    }
+    const sampleSplit = sample.split === 'test' ? 'test' : 'train';
+    if (sampleSplit !== targetSplit) {
+      return count;
+    }
+    return count + 1;
+  }, 0);
+}
+
+function withSampleCounts(
+  labels: GestureLabel[],
+  samples: Sample[],
+  targetSplit: 'train' | 'test',
+): GestureLabel[] {
+  return labels.map((label) => ({
+    ...label,
+    sampleCount: countSamplesForLabel(samples, label.id, targetSplit),
+  }));
+}
+
+export function CollectPage({
+  onComplete,
+  initialLabels,
+  initialSamples,
+  targetSplit = 'train',
+  appendMode = false,
+  requiredSamplesPerGesture,
+  onCancel,
+}: CollectPageProps) {
+  const [labels, setLabels] = useState<GestureLabel[]>(() => {
+    const seededSamples = (initialSamples ?? []).map(cloneSample);
+    const seedLabels = initialLabels && initialLabels.length > 0
+      ? initialLabels.map((label) => ({ ...label }))
+      : COLLECTION_CONFIG.DEFAULT_GESTURES.map((name, idx) => ({
+          id: `label-${idx}`,
+          name,
+          sampleCount: 0,
+        }));
+    return withSampleCounts(seedLabels, seededSamples, targetSplit);
+  });
+
+  const [samples, setSamples] = useState<Sample[]>(() =>
+    (initialSamples ?? []).map(cloneSample),
+  );
   const [currentLabel, setCurrentLabel] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingProgress, setRecordingProgress] = useState(0);
   const [feedback, setFeedback] = useState<FeedbackStatus>('recording');
+  const samplesPerGestureGoal = requiredSamplesPerGesture
+    ?? (appendMode ? 3 : COLLECTION_CONFIG.SAMPLES_PER_GESTURE);
 
   // Gesture setup phase
-  const [isSetupComplete, setIsSetupComplete] = useState(false);
+  const [isSetupComplete, setIsSetupComplete] = useState(
+    appendMode && !!initialLabels?.length,
+  );
   const [newGestureName, setNewGestureName] = useState('');
 
   // Live sensor display
@@ -234,7 +294,7 @@ export function CollectPage({ onComplete }: CollectPageProps) {
         data: sampleData,
         timestamp: getTimestampMs(),
         quality,
-        split: 'train',
+        split: targetSplit,
       };
 
       setSamples((prev) => [...prev, newSample]);
@@ -280,11 +340,11 @@ export function CollectPage({ onComplete }: CollectPageProps) {
   };
 
   const getRequiredSamples = () => {
-    return labels.length * COLLECTION_CONFIG.SAMPLES_PER_GESTURE;
+    return labels.length * samplesPerGestureGoal;
   };
 
   const isComplete = () => {
-    return labels.every((l) => l.sampleCount >= COLLECTION_CONFIG.SAMPLES_PER_GESTURE);
+    return labels.every((l) => l.sampleCount >= samplesPerGestureGoal);
   };
 
   const handleNext = () => {
@@ -394,7 +454,9 @@ export function CollectPage({ onComplete }: CollectPageProps) {
             disabled={!canStartRecording}
             className="btn-success text-xl w-full py-4 shadow-xl shadow-emerald-200 disabled:opacity-30 disabled:cursor-not-allowed"
           >
-            I'm Ready! Start Recording
+            {targetSplit === 'test'
+              ? "I'm Ready! Record Test Data"
+              : "I'm Ready! Start Recording"}
           </button>
 
           {!canStartRecording && (
@@ -412,13 +474,23 @@ export function CollectPage({ onComplete }: CollectPageProps) {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h1 className="heading-md mb-2">
-                    📊 Collect Training Data
+                    {targetSplit === 'test' ? '🧪 Collect Test Data' : '📊 Collect Training Data'}
                   </h1>
                   <p className="text-slate-600">
-                    Record {COLLECTION_CONFIG.SAMPLES_PER_GESTURE} examples of each gesture.
+                    Record {samplesPerGestureGoal} {targetSplit} examples of each gesture.
                   </p>
                 </div>
-                <div className="hidden sm:block text-4xl">📸</div>
+                <div className="hidden sm:flex items-center gap-2">
+                  {onCancel && (
+                    <button
+                      onClick={onCancel}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                    >
+                      Back
+                    </button>
+                  )}
+                  <div className="text-4xl">📸</div>
+                </div>
               </div>
 
               <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
@@ -468,8 +540,9 @@ export function CollectPage({ onComplete }: CollectPageProps) {
             <h2 className="font-bold text-slate-700 text-lg px-2">Gestures to Learn</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3">
               {labels.map((label) => {
-                const labelComplete = label.sampleCount >= COLLECTION_CONFIG.SAMPLES_PER_GESTURE;
-                const progress = (label.sampleCount / COLLECTION_CONFIG.SAMPLES_PER_GESTURE) * 100;
+                const hasReachedGoal = label.sampleCount >= samplesPerGestureGoal;
+                const labelComplete = !appendMode && hasReachedGoal;
+                const progress = (Math.min(label.sampleCount, samplesPerGestureGoal) / samplesPerGestureGoal) * 100;
 
                 return (
                   <div
@@ -488,7 +561,7 @@ export function CollectPage({ onComplete }: CollectPageProps) {
                         </span>
                       ) : (
                         <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-full">
-                          {label.sampleCount}/{COLLECTION_CONFIG.SAMPLES_PER_GESTURE}
+                          {label.sampleCount}/{samplesPerGestureGoal}
                         </span>
                       )}
                     </div>
@@ -502,14 +575,18 @@ export function CollectPage({ onComplete }: CollectPageProps) {
 
                     <button
                       onClick={() => startRecording(label.id)}
-                      disabled={isRecording || labelComplete}
+                      disabled={isRecording || (!appendMode && hasReachedGoal)}
                       className={`w-full py-2 rounded-lg font-bold text-sm transition-colors ${
                         labelComplete
                           ? 'bg-slate-100 text-slate-400 cursor-default'
                           : 'bg-primary-50 text-primary-700 hover:bg-primary-100 active:bg-primary-200'
                       }`}
                     >
-                      {labelComplete ? 'Completed' : 'Record Sample'}
+                      {labelComplete
+                        ? 'Completed'
+                        : targetSplit === 'test'
+                        ? 'Record Test Sample'
+                        : 'Record Sample'}
                     </button>
                   </div>
                 );
@@ -525,7 +602,11 @@ export function CollectPage({ onComplete }: CollectPageProps) {
                       🎉 All Done!
                     </h2>
                     <button onClick={handleNext} className="btn-success w-full shadow-emerald-200">
-                      Next: Train Model →
+                      {appendMode
+                        ? 'Return to Testing →'
+                        : targetSplit === 'test'
+                        ? 'Next: Retrain Model →'
+                        : 'Next: Train Model →'}
                     </button>
                   </div>
                 </div>

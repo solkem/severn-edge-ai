@@ -42,6 +42,11 @@ interface ChallengeStats {
   successes: number;
 }
 
+interface TestingLockState {
+  canEvaluate: boolean;
+  message: string;
+}
+
 function createInitialChallengeStats(
   labels: GestureLabel[],
 ): Record<string, ChallengeStats> {
@@ -138,6 +143,7 @@ interface TestPageProps {
   trainingService: TrainingService;
   onStartOver?: () => void;
   onOpenPortfolio?: () => void;
+  onRecordTestData?: () => void;
 }
 
 export function TestPage({
@@ -145,6 +151,7 @@ export function TestPage({
   trainingService,
   onStartOver,
   onOpenPortfolio,
+  onRecordTestData,
 }: TestPageProps) {
   const [mode, setMode] = useState<TestingMode>('live');
 
@@ -187,6 +194,74 @@ export function TestPage({
     () => splitSamplesByDataset(sessionSamples),
     [sessionSamples],
   );
+  const lockedTestingSnapshot = useMemo(() => {
+    const sampleById = new Map(sessionSamples.map((sample) => [sample.id, sample]));
+    const lockedSamples: Sample[] = [];
+    const missingIds: string[] = [];
+
+    for (const sampleId of session?.lockedTestSampleIds ?? []) {
+      const sample = sampleById.get(sampleId);
+      if (sample) {
+        lockedSamples.push(sample);
+      } else {
+        missingIds.push(sampleId);
+      }
+    }
+
+    return {
+      lockedSamples,
+      missingIds,
+    };
+  }, [session?.lockedTestSampleIds, sessionSamples]);
+  const testingLock = useMemo<TestingLockState>(() => {
+    if (!session) {
+      return {
+        canEvaluate: false,
+        message: 'Session not ready. Reconnect and retrain before model testing.',
+      };
+    }
+
+    if (session.lastTrainedDataRevision === null) {
+      return {
+        canEvaluate: false,
+        message:
+          'No locked test set for this model version. Collect held-out test samples, then retrain.',
+      };
+    }
+
+    if (session.lastTrainedDataRevision !== session.dataRevision) {
+      return {
+        canEvaluate: false,
+        message:
+          'Data changed after training. Retrain now so Model Testing and Arena use the latest model/data pair.',
+      };
+    }
+
+    if (lockedTestingSnapshot.missingIds.length > 0) {
+      return {
+        canEvaluate: false,
+        message:
+          'Locked test samples are missing from this session. Retrain to rebuild a valid locked test set.',
+      };
+    }
+
+    if (lockedTestingSnapshot.lockedSamples.length === 0) {
+      return {
+        canEvaluate: false,
+        message:
+          'Locked test set is empty. Collect test samples and retrain before running objective testing.',
+      };
+    }
+
+    return {
+      canEvaluate: true,
+      message: `Locked test set ready (${lockedTestingSnapshot.lockedSamples.length} samples).`,
+    };
+  }, [lockedTestingSnapshot.lockedSamples.length, lockedTestingSnapshot.missingIds.length, session]);
+  const objectiveTestingSamples = useMemo(
+    () => (testingLock.canEvaluate ? lockedTestingSnapshot.lockedSamples : []),
+    [lockedTestingSnapshot.lockedSamples, testingLock.canEvaluate],
+  );
   const trainingCountsByLabel = useMemo(
     () => buildCountsByLabel(trainingSamples, labels),
     [labels, trainingSamples],
@@ -195,10 +270,14 @@ export function TestPage({
     () => buildCountsByLabel(testingSamples, labels),
     [labels, testingSamples],
   );
+  const lockedTestingCountsByLabel = useMemo(
+    () => buildCountsByLabel(lockedTestingSnapshot.lockedSamples, labels),
+    [labels, lockedTestingSnapshot.lockedSamples],
+  );
 
   const arenaBenchmarks = useMemo(
-    () => buildArenaBenchmarks(labels, trainingSamples, testingSamples),
-    [labels, testingSamples, trainingSamples],
+    () => buildArenaBenchmarks(labels, trainingSamples, objectiveTestingSamples),
+    [labels, objectiveTestingSamples, trainingSamples],
   );
   const arenaBenchmarkSummary = useMemo(() => {
     const summary = {
@@ -533,23 +612,25 @@ export function TestPage({
   const evaluateAllTestSamples = () => {
     setTestingError(null);
     setTestingInfo(null);
-    if (testingSamples.length === 0) {
-      setTestingError(
-        'No test samples found. Create a test split first, then run model testing.',
-      );
+    if (!testingLock.canEvaluate) {
+      setTestingError(testingLock.message);
+      return;
+    }
+    if (objectiveTestingSamples.length === 0) {
+      setTestingError('Locked test set is empty. Collect test samples and retrain.');
       return;
     }
 
     setIsEvaluating(true);
     try {
       const nextReport = evaluateModelOnSamples(
-        testingSamples,
+        objectiveTestingSamples,
         labels,
         (sampleData) => trainingService.predict(sampleData),
       );
       setReport(nextReport);
       setTestingInfo(
-        `Classified ${nextReport.totalSamples} test samples. Accuracy: ${formatPercent(nextReport.accuracy)}.`,
+        `Classified ${nextReport.totalSamples} locked test samples. Accuracy: ${formatPercent(nextReport.accuracy)}.`,
       );
     } catch (err) {
       console.error('Model testing failed:', err);
@@ -610,9 +691,14 @@ export function TestPage({
     setArenaError(null);
     setArenaInfo(null);
 
+    if (!testingLock.canEvaluate) {
+      setArenaError(testingLock.message);
+      return;
+    }
+
     if (arenaBenchmarks.length === 0) {
       setArenaError(
-        'No arena benchmark set available. Create test split data and keep some train samples first.',
+        'No arena benchmark set available. Collect test data and retrain before running Arena.',
       );
       return;
     }
@@ -1115,17 +1201,23 @@ export function TestPage({
           <h3 className="font-bold text-slate-800 mb-3">Dataset Split</h3>
           <p className="text-sm text-slate-600 mb-4">
             Training uses <code>train</code> samples. Model testing classifies only
-            <code> test</code> samples.
+            the locked <code>test</code> set captured at the last training run.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="text-xs uppercase tracking-wide text-slate-500">Train samples</div>
               <div className="text-2xl font-bold text-slate-800">{trainingSamples.length}</div>
             </div>
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-              <div className="text-xs uppercase tracking-wide text-amber-700">Test samples</div>
+              <div className="text-xs uppercase tracking-wide text-amber-700">Current test pool</div>
               <div className="text-2xl font-bold text-amber-800">{testingSamples.length}</div>
+            </div>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+              <div className="text-xs uppercase tracking-wide text-emerald-700">Locked test set</div>
+              <div className="text-2xl font-bold text-emerald-800">
+                {lockedTestingSnapshot.lockedSamples.length}
+              </div>
             </div>
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
               <div className="text-xs uppercase tracking-wide text-blue-700">Gestures</div>
@@ -1139,7 +1231,8 @@ export function TestPage({
                 <tr className="text-left text-slate-500 border-b border-slate-200">
                   <th className="py-2 pr-4">Gesture</th>
                   <th className="py-2 pr-4">Train</th>
-                  <th className="py-2 pr-4">Test</th>
+                  <th className="py-2 pr-4">Current Test</th>
+                  <th className="py-2 pr-4">Locked Test</th>
                 </tr>
               </thead>
               <tbody>
@@ -1148,6 +1241,7 @@ export function TestPage({
                     <td className="py-2 pr-4 font-medium">{label.name}</td>
                     <td className="py-2 pr-4">{trainingCountsByLabel.get(label.id) ?? 0}</td>
                     <td className="py-2 pr-4">{testingCountsByLabel.get(label.id) ?? 0}</td>
+                    <td className="py-2 pr-4">{lockedTestingCountsByLabel.get(label.id) ?? 0}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1155,6 +1249,14 @@ export function TestPage({
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
+            {onRecordTestData && (
+              <button
+                onClick={onRecordTestData}
+                className="btn-secondary bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border-emerald-300"
+              >
+                Collect Test Data
+              </button>
+            )}
             <button
               onClick={applyRecommendedSplit}
               disabled={isApplyingSplit}
@@ -1164,16 +1266,26 @@ export function TestPage({
             </button>
             <button
               onClick={evaluateAllTestSamples}
-              disabled={isEvaluating || testingSamples.length === 0}
+              disabled={isEvaluating || !testingLock.canEvaluate}
               className="btn-primary disabled:opacity-50"
             >
-              {isEvaluating ? 'Classifying...' : 'Classify All Test Samples'}
+              {isEvaluating ? 'Classifying...' : 'Classify Locked Test Set'}
             </button>
           </div>
 
           <p className="mt-3 text-xs text-slate-500">
-            After changing the split, retrain the model before trusting this score.
+            Any data change invalidates locked results. Retrain to refresh the locked test set.
           </p>
+
+          <div
+            className={`mt-3 rounded-xl border p-3 text-sm ${
+              testingLock.canEvaluate
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border-amber-200 bg-amber-50 text-amber-900'
+            }`}
+          >
+            {testingLock.message}
+          </div>
 
           {testingError && (
             <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
@@ -1393,7 +1505,7 @@ export function TestPage({
                 <tr className="text-left text-slate-500 border-b border-slate-200">
                   <th className="py-2 pr-4">Gesture</th>
                   <th className="py-2 pr-4">Train</th>
-                  <th className="py-2 pr-4">Test</th>
+                  <th className="py-2 pr-4">Locked Test</th>
                   <th className="py-2 pr-4">Generic Benchmarks</th>
                 </tr>
               </thead>
@@ -1406,7 +1518,7 @@ export function TestPage({
                     <tr key={label.id} className="border-b border-slate-100 text-slate-700">
                       <td className="py-2 pr-4 font-medium">{label.name}</td>
                       <td className="py-2 pr-4">{trainingCountsByLabel.get(label.id) ?? 0}</td>
-                      <td className="py-2 pr-4">{testingCountsByLabel.get(label.id) ?? 0}</td>
+                      <td className="py-2 pr-4">{lockedTestingCountsByLabel.get(label.id) ?? 0}</td>
                       <td className="py-2 pr-4">{genericCount}</td>
                     </tr>
                   );
@@ -1416,9 +1528,21 @@ export function TestPage({
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
+            {onRecordTestData && (
+              <button
+                onClick={onRecordTestData}
+                className="btn-secondary bg-emerald-100 hover:bg-emerald-200 border-emerald-300 text-emerald-900"
+              >
+                Collect Test Data
+              </button>
+            )}
             <button
               onClick={runArenaBenchmark}
-              disabled={isRunningArena || arenaBenchmarkSummary.total === 0}
+              disabled={
+                isRunningArena
+                || arenaBenchmarkSummary.total === 0
+                || !testingLock.canEvaluate
+              }
               className="btn-primary disabled:opacity-50"
             >
               {isRunningArena ? 'Running Arena...' : 'Run Arena Benchmark'}
@@ -1430,6 +1554,16 @@ export function TestPage({
             >
               Submit Score to Leaderboard
             </button>
+          </div>
+
+          <div
+            className={`mt-3 rounded-xl border p-3 text-sm ${
+              testingLock.canEvaluate
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border-amber-200 bg-amber-50 text-amber-900'
+            }`}
+          >
+            {testingLock.message}
           </div>
 
           {arenaError && (

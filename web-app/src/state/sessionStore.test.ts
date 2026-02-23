@@ -20,6 +20,9 @@ const dbMocks = vi.hoisted(() => {
       checkpointIds: [],
       currentStage: AppStage.CONNECT,
       trainingAccuracy: null,
+      dataRevision: 0,
+      lastTrainedDataRevision: null,
+      lockedTestSampleIds: [],
       lastDeviceName: null,
       overrideUsedAt: [],
     };

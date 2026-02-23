@@ -29,7 +29,7 @@ interface SevernEdgeDB extends DBSchema {
 }
 
 const DB_NAME = 'severn-edge-ai';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 let dbPromise: Promise<IDBPDatabase<SevernEdgeDB>> | null = null;
 const sessionWriteQueues = new Map<string, Promise<void>>();
@@ -51,6 +51,9 @@ export function createEmptySessionMeta(): SessionMeta {
     checkpointIds: [],
     currentStage: 'connect' as AppStage,
     trainingAccuracy: null,
+    dataRevision: 0,
+    lastTrainedDataRevision: null,
+    lockedTestSampleIds: [],
     lastDeviceName: null,
     overrideUsedAt: [],
   };
@@ -131,6 +134,15 @@ async function getDb(): Promise<IDBPDatabase<SevernEdgeDB>> {
               currentStage: (raw.currentStage as AppStage) ?? ('connect' as AppStage),
               trainingAccuracy:
                 typeof raw.trainingAccuracy === 'number' ? raw.trainingAccuracy : null,
+              dataRevision:
+                typeof raw.dataRevision === 'number' ? raw.dataRevision : 0,
+              lastTrainedDataRevision:
+                typeof raw.lastTrainedDataRevision === 'number'
+                  ? raw.lastTrainedDataRevision
+                  : null,
+              lockedTestSampleIds: Array.isArray(raw.lockedTestSampleIds)
+                ? (raw.lockedTestSampleIds as string[])
+                : [],
               lastDeviceName:
                 typeof raw.lastDeviceName === 'string' ? raw.lastDeviceName : null,
               overrideUsedAt: Array.isArray(raw.overrideUsedAt)
@@ -158,6 +170,28 @@ async function getDb(): Promise<IDBPDatabase<SevernEdgeDB>> {
             }
 
             await cursor.update(meta);
+            cursor = await cursor.continue();
+          }
+        }
+
+        if (oldVersion < 3 && db.objectStoreNames.contains('sessions')) {
+          const sessionsStore = tx.objectStore('sessions');
+          let cursor = await sessionsStore.openCursor();
+          while (cursor) {
+            const raw = cursor.value as SessionMeta & Partial<Record<string, unknown>>;
+            const updated: SessionMeta = {
+              ...raw,
+              dataRevision:
+                typeof raw.dataRevision === 'number' ? raw.dataRevision : 0,
+              lastTrainedDataRevision:
+                typeof raw.lastTrainedDataRevision === 'number'
+                  ? raw.lastTrainedDataRevision
+                  : null,
+              lockedTestSampleIds: Array.isArray(raw.lockedTestSampleIds)
+                ? (raw.lockedTestSampleIds as string[])
+                : [],
+            };
+            await cursor.update(updated);
             cursor = await cursor.continue();
           }
         }

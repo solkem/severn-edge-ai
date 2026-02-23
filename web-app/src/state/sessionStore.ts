@@ -36,6 +36,7 @@ interface SessionActions {
   setSamples: (samples: Sample[]) => Promise<void>;
   addSample: (sample: Sample) => Promise<void>;
   setTrainingAccuracy: (accuracy: number | null) => void;
+  recordTrainingSnapshot: (lockedTestSampleIds: string[]) => void;
   addBadge: (badgeId: BadgeId) => void;
   clearAwardedBadge: () => void;
   passCheckpoint: (checkpointId: CheckpointId) => void;
@@ -187,20 +188,45 @@ export const useSessionStore = createStore<SessionStore>((set, get) => ({
 
   setSamples: async (samples) => {
     const session = ensureSession(get().session);
-    set({ samples });
+    const updatedMeta = bumpRevision(session, {
+      dataRevision: session.dataRevision + 1,
+    });
+    set({
+      samples,
+      session: updatedMeta,
+    });
+    void saveSessionMetaQueued(updatedMeta);
     await replaceSessionSamples(session.id, samples);
   },
 
   addSample: async (sample) => {
     const session = ensureSession(get().session);
     const nextSamples = [...get().samples, sample];
-    set({ samples: nextSamples });
+    const updatedMeta = bumpRevision(session, {
+      dataRevision: session.dataRevision + 1,
+    });
+    set({
+      samples: nextSamples,
+      session: updatedMeta,
+    });
+    void saveSessionMetaQueued(updatedMeta);
     await upsertSample(session.id, sample);
   },
 
   setTrainingAccuracy: (accuracy) => {
     const session = ensureSession(get().session);
     const updated = bumpRevision(session, { trainingAccuracy: accuracy });
+    set({ session: updated });
+    void saveSessionMetaQueued(updated);
+  },
+
+  recordTrainingSnapshot: (lockedTestSampleIds) => {
+    const session = ensureSession(get().session);
+    const uniqueLockedIds = [...new Set(lockedTestSampleIds)];
+    const updated = bumpRevision(session, {
+      lastTrainedDataRevision: session.dataRevision,
+      lockedTestSampleIds: uniqueLockedIds,
+    });
     set({ session: updated });
     void saveSessionMetaQueued(updated);
   },

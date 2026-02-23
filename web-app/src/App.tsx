@@ -29,11 +29,28 @@ import {
 } from './data/knowledgeChecks';
 import type { CheckpointId } from './storage/schema';
 
+type CollectFlow = 'initial' | 'test-holdout';
+
+function withTotalSampleCounts(
+  labels: GestureLabel[],
+  samples: Sample[],
+): GestureLabel[] {
+  const counts = new Map<string, number>();
+  for (const sample of samples) {
+    counts.set(sample.label, (counts.get(sample.label) ?? 0) + 1);
+  }
+  return labels.map((label) => ({
+    ...label,
+    sampleCount: counts.get(label.id) ?? 0,
+  }));
+}
+
 function App() {
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const [trainingService, setTrainingService] = useState<TrainingService | null>(null);
   const [activeCheck, setActiveCheck] = useState<KnowledgeCheck | null>(null);
   const [pendingStage, setPendingStage] = useState<AppStageType | null>(null);
+  const [collectFlow, setCollectFlow] = useState<CollectFlow>('initial');
 
   const initializeSession = useSessionStore((state) => state.initialize);
   const session = useSessionStore((state) => state.session);
@@ -111,16 +128,22 @@ function App() {
   };
 
   const handlePreviewReady = () => {
+    setCollectFlow('initial');
     requestGate('gate-1-sensor', AppStage.COLLECT);
   };
 
-  const handleCollectComplete = (collectedSamples: Sample[], collectedLabels: GestureLabel[]) => {
-    setSessionGestures(collectedLabels);
-    void setSessionSamples(collectedSamples);
-    if (
-      collectedLabels.length > 0 &&
-      collectedLabels.every((l) => l.sampleCount >= 10)
-    ) {
+  const handleCollectComplete = async (
+    collectedSamples: Sample[],
+    collectedLabels: GestureLabel[],
+  ) => {
+    const normalizedLabels = withTotalSampleCounts(collectedLabels, collectedSamples);
+    setSessionGestures(normalizedLabels);
+    await setSessionSamples(collectedSamples);
+    if (collectFlow === 'test-holdout') {
+      goToStage(AppStage.TEST);
+      return;
+    }
+    if (normalizedLabels.length > 0 && normalizedLabels.every((l) => l.sampleCount >= 10)) {
       addBadge('data-scientist');
     }
     requestGate('gate-2-gesture', AppStage.TRAIN);
@@ -144,11 +167,17 @@ function App() {
     requestGate('gate-4-edge-ai', nextStage);
   };
 
+  const handleRecordTestData = () => {
+    setCollectFlow('test-holdout');
+    goToStage(AppStage.COLLECT);
+  };
+
   const handleStartOver = () => {
     setSessionStage(AppStage.CONNECT);
     void startFresh();
     setDeviceInfo(null);
     setTrainingService(null);
+    setCollectFlow('initial');
     setActiveCheck(null);
     setPendingStage(null);
     clearResumeStage();
@@ -253,7 +282,17 @@ function App() {
 
         {stage === AppStage.PREVIEW && <PreviewPage onReady={handlePreviewReady} />}
 
-        {stage === AppStage.COLLECT && <CollectPage onComplete={handleCollectComplete} />}
+        {stage === AppStage.COLLECT && (
+          <CollectPage
+            onComplete={handleCollectComplete}
+            initialLabels={collectFlow === 'test-holdout' ? labels : undefined}
+            initialSamples={collectFlow === 'test-holdout' ? samples : undefined}
+            targetSplit={collectFlow === 'test-holdout' ? 'test' : 'train'}
+            appendMode={collectFlow === 'test-holdout'}
+            requiredSamplesPerGesture={collectFlow === 'test-holdout' ? 3 : undefined}
+            onCancel={collectFlow === 'test-holdout' ? () => goToStage(AppStage.TEST) : undefined}
+          />
+        )}
 
         {stage === AppStage.TRAIN && (
           <TrainPage samples={samples} labels={labels} onComplete={handleTrainComplete} />
@@ -265,6 +304,7 @@ function App() {
             trainingService={trainingService}
             onStartOver={handleStartOver}
             onOpenPortfolio={handleOpenPortfolio}
+            onRecordTestData={handleRecordTestData}
           />
         )}
 
