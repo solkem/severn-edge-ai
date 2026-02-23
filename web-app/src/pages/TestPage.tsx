@@ -34,12 +34,22 @@ const CHALLENGE_REQUIRED_SUCCESSES = Math.ceil(
 const LIVE_IDLE_CONFIDENCE_THRESHOLD = 0.55;
 const ARENA_LEADERBOARD_STORAGE_KEY = 'severn-edge-ai-arena-v1';
 const ARENA_MAX_LEADERBOARD_ROWS = 200;
+const HOLD_CAPTURE_MIN_MS = 1200;
+const HOLD_CAPTURE_MIN_FRAMES = 8;
+const HOLD_CAPTURE_SUPPORT_THRESHOLD = 0.6;
+const HOLD_CAPTURE_BUFFER_MS = 20000;
 
 type TestingMode = 'live' | 'model-testing' | 'arena';
 
 interface ChallengeStats {
   attempts: number;
   successes: number;
+}
+
+interface InferenceFrame {
+  timestamp: number;
+  prediction: number;
+  confidence: number;
 }
 
 interface TestingLockState {
@@ -166,6 +176,8 @@ export function TestPage({
   const [showDistribution, setShowDistribution] = useState(false);
   const [targetGestureIndex, setTargetGestureIndex] = useState(0);
   const [challengeNote, setChallengeNote] = useState<string | null>(null);
+  const [isHoldingAttempt, setIsHoldingAttempt] = useState(false);
+  const [holdDurationMs, setHoldDurationMs] = useState(0);
   const [challengeStats, setChallengeStats] = useState<Record<string, ChallengeStats>>(
     () => createInitialChallengeStats(labels),
   );
@@ -184,6 +196,9 @@ export function TestPage({
   const [arenaResult, setArenaResult] = useState<ArenaRunResult | null>(null);
   const [arenaSubmissions, setArenaSubmissions] = useState<ArenaSubmission[]>([]);
   const arenaImportRef = useRef<HTMLInputElement | null>(null);
+  const holdStartRef = useRef<number | null>(null);
+  const holdTargetIndexRef = useRef<number | null>(null);
+  const inferenceFramesRef = useRef<InferenceFrame[]>([]);
 
   const session = useSessionStore((state) => state.session);
   const sessionSamples = useSessionStore((state) => state.samples);
@@ -346,7 +361,30 @@ export function TestPage({
     const ble = getBLEService();
     void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
     setIsRunning(false);
+    setIsHoldingAttempt(false);
+    holdStartRef.current = null;
+    holdTargetIndexRef.current = null;
+    setHoldDurationMs(0);
   }, [isRunning, mode]);
+
+  useEffect(() => {
+    if (!isHoldingAttempt) {
+      setHoldDurationMs(0);
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      if (holdStartRef.current === null) {
+        setHoldDurationMs(0);
+        return;
+      }
+      setHoldDurationMs(Date.now() - holdStartRef.current);
+    }, 100);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [isHoldingAttempt]);
 
   const persistArenaSubmissions = (next: ArenaSubmission[]) => {
     const trimmed = rankArenaSubmissions(next).slice(0, ARENA_MAX_LEADERBOARD_ROWS);
@@ -358,19 +396,39 @@ export function TestPage({
     }
   };
 
+  const appendInferenceFrame = (prediction: number, confidenceValue: number) => {
+    const frame: InferenceFrame = {
+      timestamp: Date.now(),
+      prediction,
+      confidence: Math.max(0, Math.min(1, confidenceValue)),
+    };
+    const frames = inferenceFramesRef.current;
+    frames.push(frame);
+    while (frames.length > 0 && frame.timestamp - frames[0].timestamp > HOLD_CAPTURE_BUFFER_MS) {
+      frames.shift();
+    }
+  };
+
   const startTesting = async () => {
     const ble = getBLEService();
     setLiveError(null);
     setChallengeNote(null);
     setCurrentPrediction(null);
     setConfidence(0);
+    setIsHoldingAttempt(false);
+    holdStartRef.current = null;
+    holdTargetIndexRef.current = null;
+    setHoldDurationMs(0);
+    inferenceFramesRef.current = [];
     setIsRunning(true);
 
     try {
       if (useArduinoInference) {
         await ble.startInference((result: InferenceResult) => {
           setCurrentPrediction(result.prediction);
-          setConfidence(result.confidence / 100);
+          const normalizedConfidence = result.confidence / 100;
+          setConfidence(normalizedConfidence);
+          appendInferenceFrame(result.prediction, normalizedConfidence);
           if (result.confidence >= 80) {
             setHighConfidenceCount((prev) => {
               const next = prev + 1;
@@ -398,6 +456,7 @@ export function TestPage({
             );
             setCurrentPrediction(result.prediction);
             setConfidence(result.confidence);
+            appendInferenceFrame(result.prediction, result.confidence);
             setPredictionHistory((prev) => [...prev.slice(-99), result.prediction]);
             sampleBuffer.splice(0, sampleBuffer.length - MODEL_CONFIG.WINDOW_STRIDE);
           }
@@ -429,44 +488,116 @@ export function TestPage({
       );
     } finally {
       setIsRunning(false);
+      setIsHoldingAttempt(false);
+      holdStartRef.current = null;
+      holdTargetIndexRef.current = null;
+      setHoldDurationMs(0);
     }
   };
 
-  const scoreCurrentAttempt = () => {
+  const beginHoldAttempt = () => {
     const target = labels[targetGestureIndex];
     if (!target) return;
 
     if (!isRunning) {
-      setChallengeNote('Press Start Testing, perform the gesture, then tap Score Attempt.');
+      setChallengeNote('Press Start Testing first, then hold to capture your gesture attempt.');
       return;
     }
 
-    if (
-      currentPrediction === null ||
-      currentPrediction < 0 ||
-      currentPrediction >= labels.length
-    ) {
-      if (currentPrediction === labels.length) {
-        setChallengeNote(
-          `Idle detected. Perform "${target.name}" clearly, then tap Score Attempt.`,
-        );
-      } else {
-        setChallengeNote('No clear gesture yet. Move the board and wait for a prediction first.');
-      }
+    if (isHoldingAttempt) {
       return;
     }
 
-    if (confidence < LIVE_IDLE_CONFIDENCE_THRESHOLD) {
+    holdStartRef.current = Date.now();
+    holdTargetIndexRef.current = targetGestureIndex;
+    setHoldDurationMs(0);
+    setIsHoldingAttempt(true);
+    setChallengeNote(`Capturing "${target.name}"... keep moving, then release to score.`);
+  };
+
+  const endHoldAttempt = () => {
+    if (!isHoldingAttempt) {
+      return;
+    }
+
+    const targetIndex =
+      holdTargetIndexRef.current !== null ? holdTargetIndexRef.current : targetGestureIndex;
+    const target = labels[targetIndex];
+    const startedAt = holdStartRef.current;
+    holdStartRef.current = null;
+    holdTargetIndexRef.current = null;
+    setIsHoldingAttempt(false);
+    if (!target || !startedAt) {
+      return;
+    }
+
+    const endedAt = Date.now();
+    const durationMs = endedAt - startedAt;
+    if (durationMs < HOLD_CAPTURE_MIN_MS) {
       setChallengeNote(
-        `No gesture confidently detected (Idle-like). Perform "${target.name}" with a bigger, cleaner motion.`,
+        `Hold too short (${(durationMs / 1000).toFixed(1)}s). Hold for at least ${(HOLD_CAPTURE_MIN_MS / 1000).toFixed(1)}s.`,
       );
       return;
     }
 
-    const predictedLabel = labels[currentPrediction];
-    const isCorrectGesture = currentPrediction === targetGestureIndex;
-    const isConfident = confidence >= CHALLENGE_MIN_CONFIDENCE;
-    const isSuccess = isCorrectGesture && isConfident;
+    const capturedFrames = inferenceFramesRef.current.filter(
+      (frame) => frame.timestamp >= startedAt && frame.timestamp <= endedAt,
+    );
+    if (capturedFrames.length < HOLD_CAPTURE_MIN_FRAMES) {
+      setChallengeNote(
+        `Not enough signal in capture window (${capturedFrames.length} frames). Try a bigger, clearer motion.`,
+      );
+      return;
+    }
+
+    const labelCounts = new Array(labels.length).fill(0);
+    const labelConfidenceSums = new Array(labels.length).fill(0);
+    let idleCount = 0;
+
+    for (const frame of capturedFrames) {
+      const isIdleFrame =
+        frame.prediction === labels.length
+        || frame.confidence < LIVE_IDLE_CONFIDENCE_THRESHOLD;
+      if (isIdleFrame) {
+        idleCount += 1;
+        continue;
+      }
+      if (frame.prediction >= 0 && frame.prediction < labels.length) {
+        labelCounts[frame.prediction] += 1;
+        labelConfidenceSums[frame.prediction] += frame.confidence;
+      }
+    }
+
+    let bestLabelIndex = -1;
+    let bestVotes = -1;
+    let bestConfidenceSum = -1;
+    for (let idx = 0; idx < labels.length; idx += 1) {
+      if (
+        labelCounts[idx] > bestVotes
+        || (labelCounts[idx] === bestVotes && labelConfidenceSums[idx] > bestConfidenceSum)
+      ) {
+        bestVotes = labelCounts[idx];
+        bestConfidenceSum = labelConfidenceSums[idx];
+        bestLabelIndex = idx;
+      }
+    }
+
+    const support = bestVotes > 0 ? bestVotes / capturedFrames.length : 0;
+    const avgConfidence = bestVotes > 0 ? bestConfidenceSum / bestVotes : 0;
+    const idleRatio = idleCount / capturedFrames.length;
+    const predictedLabelName =
+      bestLabelIndex >= 0 && bestLabelIndex < labels.length
+        ? labels[bestLabelIndex].name
+        : 'Idle';
+
+    const isCorrectGesture = bestLabelIndex === targetIndex;
+    const hasSupport = support >= HOLD_CAPTURE_SUPPORT_THRESHOLD;
+    const isConfident = avgConfidence >= CHALLENGE_MIN_CONFIDENCE;
+    const isSuccess =
+      isCorrectGesture
+      && hasSupport
+      && isConfident
+      && idleRatio < 0.7;
 
     setChallengeStats((prev) => {
       const existing = prev[target.id] ?? { attempts: 0, successes: 0 };
@@ -481,24 +612,42 @@ export function TestPage({
 
     if (isSuccess) {
       setChallengeNote(
-        `Nice! "${target.name}" detected at ${formatPercent(confidence, 0)} confidence.`,
+        `Great capture. "${target.name}" won ${formatPercent(support, 0)} of frames at ${formatPercent(avgConfidence, 0)} confidence.`,
+      );
+      return;
+    }
+
+    if (idleRatio >= 0.7) {
+      setChallengeNote(
+        `Mostly idle during capture (${formatPercent(idleRatio, 0)}). Repeat "${target.name}" with a larger motion.`,
       );
       return;
     }
 
     if (!isCorrectGesture) {
       setChallengeNote(
-        `Not yet. AI predicted "${predictedLabel.name}". Repeat "${target.name}" like your training samples.`,
+        `Captured as "${predictedLabelName}" (support ${formatPercent(support, 0)}). Match "${target.name}" more consistently.`,
+      );
+      return;
+    }
+
+    if (!hasSupport) {
+      setChallengeNote(
+        `Mixed capture for "${target.name}" (${formatPercent(support, 0)} support). Keep the gesture shape steady for the whole hold.`,
       );
       return;
     }
 
     setChallengeNote(
-      `Close. Correct gesture, but confidence ${formatPercent(confidence, 0)} is below ${formatPercent(CHALLENGE_MIN_CONFIDENCE, 0)}.`,
+      `Correct class but low confidence (${formatPercent(avgConfidence, 0)}). Repeat "${target.name}" more like your training samples.`,
     );
   };
 
   const resetChallenge = () => {
+    holdStartRef.current = null;
+    holdTargetIndexRef.current = null;
+    setIsHoldingAttempt(false);
+    setHoldDurationMs(0);
     setChallengeStats(createInitialChallengeStats(labels));
     setChallengeNote(null);
   };
@@ -547,10 +696,10 @@ export function TestPage({
       .filter((row) => row.attempts > 0 && row.attempts < CHALLENGE_MIN_ATTEMPTS)
       .map((row) => row.label.name);
     if (inProgress.length > 0) {
-      return `Keep scoring attempts for: ${inProgress.join(', ')}.`;
+      return `Keep capturing hold attempts for: ${inProgress.join(', ')}.`;
     }
 
-    return 'Pick a gesture target and start scoring attempts.';
+    return 'Pick a gesture target, hold the capture button while moving, then release to score.';
   }, [challengeComplete, challengeRows]);
 
   const livePredictionView = useMemo(() => {
@@ -947,7 +1096,7 @@ export function TestPage({
             </h3>
             <p className="text-sm text-amber-800">
               For each gesture, reach at least {CHALLENGE_REQUIRED_SUCCESSES} successful
-              attempts out of {CHALLENGE_MIN_ATTEMPTS} scored attempts.
+              attempts out of {CHALLENGE_MIN_ATTEMPTS} hold captures.
             </p>
 
             <div className="mt-3 flex flex-wrap gap-2">
@@ -981,7 +1130,7 @@ export function TestPage({
 
             <div className="mt-4">
               <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Choose gesture to score now
+                Choose gesture to capture now
               </div>
               <div className="flex flex-wrap gap-2">
                 {labels.map((label, idx) => (
@@ -1002,12 +1151,25 @@ export function TestPage({
 
             <div className="mt-4 space-y-2">
               <button
-                onClick={scoreCurrentAttempt}
+                onPointerDown={beginHoldAttempt}
+                onPointerUp={endHoldAttempt}
+                onPointerLeave={endHoldAttempt}
+                onPointerCancel={endHoldAttempt}
                 className="w-full rounded-xl bg-primary-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                 disabled={!activeTarget}
               >
-                Score Attempt{activeTarget ? ` for "${activeTarget.name}"` : ''}
+                {!activeTarget
+                  ? 'Choose a Gesture Target'
+                  : !isRunning
+                  ? 'Start Testing First'
+                  : isHoldingAttempt
+                  ? `Release to Score "${activeTarget.name}" (${(holdDurationMs / 1000).toFixed(1)}s)`
+                  : `Hold to Capture "${activeTarget.name}"`}
               </button>
+              <p className="text-xs text-slate-500">
+                Hold while performing the target gesture, then release. The score uses all
+                predictions in that capture window, not a single instant.
+              </p>
               <button
                 onClick={resetChallenge}
                 className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
@@ -1098,6 +1260,7 @@ export function TestPage({
             </h3>
             <p className="text-sm text-blue-800 mb-3">{challengeCoachText}</p>
             <ul className="space-y-2 text-sm text-blue-800">
+              <li>Hold the capture button while you do the target gesture, then release to score.</li>
               <li>Hold the Arduino the same way you did during training.</li>
               <li>Use consistent speed and range for each gesture.</li>
               <li>Green confidence bar usually means cleaner class separation.</li>
