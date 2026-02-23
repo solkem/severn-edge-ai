@@ -34,6 +34,7 @@ const CHALLENGE_REQUIRED_SUCCESSES = Math.ceil(
 const LIVE_IDLE_CONFIDENCE_THRESHOLD = 0.55;
 const ARENA_LEADERBOARD_STORAGE_KEY = 'severn-edge-ai-arena-v1';
 const ARENA_MAX_LEADERBOARD_ROWS = 200;
+const LIVE_SESSION_MAX_MS = 2 * 60 * 1000;
 const TIMED_CAPTURE_PREP_MS = 1200;
 const TIMED_CAPTURE_WINDOW_MS = 2000;
 const TIMED_CAPTURE_MIN_FRAMES = 8;
@@ -85,6 +86,13 @@ function formatPercent(value: number, digits = 1): string {
 
 function formatDateTime(timestamp: number): string {
   return new Date(timestamp).toLocaleString();
+}
+
+function formatClock(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 function buildCountsByLabel(
@@ -170,11 +178,9 @@ export function TestPage({
   const [isRunning, setIsRunning] = useState(false);
   const [currentPrediction, setCurrentPrediction] = useState<number | null>(null);
   const [confidence, setConfidence] = useState(0);
-  const [predictionHistory, setPredictionHistory] = useState<number[]>([]);
+  const [sessionMsRemaining, setSessionMsRemaining] = useState(LIVE_SESSION_MAX_MS);
   const [useArduinoInference, setUseArduinoInference] = useState(true);
-  const [highConfidenceCount, setHighConfidenceCount] = useState(0);
   const [liveError, setLiveError] = useState<string | null>(null);
-  const [showDistribution, setShowDistribution] = useState(false);
   const [targetGestureIndex, setTargetGestureIndex] = useState(0);
   const [challengeNote, setChallengeNote] = useState<string | null>(null);
   const [capturePhase, setCapturePhase] = useState<'idle' | 'prep' | 'capturing'>('idle');
@@ -197,12 +203,15 @@ export function TestPage({
   const [arenaResult, setArenaResult] = useState<ArenaRunResult | null>(null);
   const [arenaSubmissions, setArenaSubmissions] = useState<ArenaSubmission[]>([]);
   const arenaImportRef = useRef<HTMLInputElement | null>(null);
+  const highConfidenceCountRef = useRef(0);
   const captureRunIdRef = useRef(0);
   const capturePhaseStartedAtRef = useRef<number | null>(null);
   const captureTargetIndexRef = useRef<number | null>(null);
   const captureWindowStartRef = useRef<number | null>(null);
   const capturePrepTimerRef = useRef<number | null>(null);
   const captureScoreTimerRef = useRef<number | null>(null);
+  const liveSessionStopTimerRef = useRef<number | null>(null);
+  const liveSessionStartedAtRef = useRef<number | null>(null);
   const inferenceFramesRef = useRef<InferenceFrame[]>([]);
 
   const session = useSessionStore((state) => state.session);
@@ -319,6 +328,17 @@ export function TestPage({
     [arenaSubmissions],
   );
 
+  const clearLiveSessionTimers = useCallback((resetRemaining = true) => {
+    if (liveSessionStopTimerRef.current !== null) {
+      window.clearTimeout(liveSessionStopTimerRef.current);
+      liveSessionStopTimerRef.current = null;
+    }
+    liveSessionStartedAtRef.current = null;
+    if (resetRemaining) {
+      setSessionMsRemaining(LIVE_SESSION_MAX_MS);
+    }
+  }, []);
+
   const clearTimedCaptureTimers = useCallback(() => {
     if (capturePrepTimerRef.current !== null) {
       window.clearTimeout(capturePrepTimerRef.current);
@@ -344,11 +364,12 @@ export function TestPage({
 
   useEffect(() => {
     return () => {
+      clearLiveSessionTimers(false);
       clearTimedCaptureTimers();
       const ble = getBLEService();
       void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
     };
-  }, [clearTimedCaptureTimers]);
+  }, [clearLiveSessionTimers, clearTimedCaptureTimers]);
 
   useEffect(() => {
     try {
@@ -390,8 +411,28 @@ export function TestPage({
     const ble = getBLEService();
     void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
     setIsRunning(false);
+    clearLiveSessionTimers();
     clearTimedCapture();
-  }, [clearTimedCapture, isRunning, mode]);
+  }, [clearLiveSessionTimers, clearTimedCapture, isRunning, mode]);
+
+  useEffect(() => {
+    if (!isRunning || liveSessionStartedAtRef.current === null) {
+      setSessionMsRemaining(LIVE_SESSION_MAX_MS);
+      return;
+    }
+
+    const tick = () => {
+      if (liveSessionStartedAtRef.current === null) return;
+      const elapsed = Date.now() - liveSessionStartedAtRef.current;
+      setSessionMsRemaining(Math.max(0, LIVE_SESSION_MAX_MS - elapsed));
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 200);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [isRunning]);
 
   useEffect(() => {
     if (capturePhase === 'idle') {
@@ -444,14 +485,45 @@ export function TestPage({
     }
   };
 
+  const stopTestingInternal = useCallback(
+    async (reason?: string) => {
+      const ble = getBLEService();
+      try {
+        await Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
+      } catch (err) {
+        console.error('Stop testing failed:', err);
+        setLiveError(
+          err instanceof Error ? err.message : 'Failed to stop testing cleanly.',
+        );
+      } finally {
+        setIsRunning(false);
+        clearLiveSessionTimers();
+        clearTimedCapture();
+        if (reason) {
+          setChallengeNote(reason);
+        }
+      }
+    },
+    [clearLiveSessionTimers, clearTimedCapture],
+  );
+
   const startTesting = async () => {
     const ble = getBLEService();
     setLiveError(null);
     setChallengeNote(null);
     setCurrentPrediction(null);
     setConfidence(0);
+    clearLiveSessionTimers();
     clearTimedCapture();
     inferenceFramesRef.current = [];
+    highConfidenceCountRef.current = 0;
+    liveSessionStartedAtRef.current = Date.now();
+    setSessionMsRemaining(LIVE_SESSION_MAX_MS);
+    liveSessionStopTimerRef.current = window.setTimeout(() => {
+      void stopTestingInternal(
+        'Live testing session ended after 2 minutes. Start Testing to run another round.',
+      );
+    }, LIVE_SESSION_MAX_MS);
     setIsRunning(true);
 
     try {
@@ -462,15 +534,11 @@ export function TestPage({
           setConfidence(normalizedConfidence);
           appendInferenceFrame(result.prediction, normalizedConfidence);
           if (result.confidence >= 80) {
-            setHighConfidenceCount((prev) => {
-              const next = prev + 1;
-              if (next === 10) {
-                addBadge('sharp-shooter');
-              }
-              return next;
-            });
+            highConfidenceCountRef.current += 1;
+            if (highConfidenceCountRef.current === 10) {
+              addBadge('sharp-shooter');
+            }
           }
-          setPredictionHistory((prev) => [...prev.slice(-99), result.prediction]);
         });
       } else {
         const { MODEL_CONFIG } = await import('../config/constants');
@@ -489,13 +557,13 @@ export function TestPage({
             setCurrentPrediction(result.prediction);
             setConfidence(result.confidence);
             appendInferenceFrame(result.prediction, result.confidence);
-            setPredictionHistory((prev) => [...prev.slice(-99), result.prediction]);
             sampleBuffer.splice(0, sampleBuffer.length - MODEL_CONFIG.WINDOW_STRIDE);
           }
         });
       }
     } catch (err) {
       setIsRunning(false);
+      clearLiveSessionTimers();
       clearTimedCapture();
       console.error('Start testing failed:', err);
       setLiveError(
@@ -506,23 +574,8 @@ export function TestPage({
     }
   };
 
-  const stopTesting = async () => {
-    const ble = getBLEService();
-    try {
-      if (useArduinoInference) {
-        await ble.stopInference();
-      } else {
-        await ble.stopSensorStream();
-      }
-    } catch (err) {
-      console.error('Stop testing failed:', err);
-      setLiveError(
-        err instanceof Error ? err.message : 'Failed to stop testing cleanly.',
-      );
-    } finally {
-      setIsRunning(false);
-      clearTimedCapture();
-    }
+  const stopTesting = () => {
+    void stopTestingInternal();
   };
 
   const evaluateCaptureWindow = (
@@ -692,16 +745,6 @@ export function TestPage({
     setChallengeNote(null);
   };
 
-  const predictionCounts = useMemo(() => {
-    const counts = new Array(labels.length).fill(0);
-    for (const pred of predictionHistory) {
-      if (pred >= 0 && pred < counts.length) {
-        counts[pred] += 1;
-      }
-    }
-    return counts;
-  }, [labels.length, predictionHistory]);
-
   const challengeRows = useMemo(() => {
     return labels.map((label, idx) => {
       const stats = challengeStats[label.id] ?? { attempts: 0, successes: 0 };
@@ -719,28 +762,6 @@ export function TestPage({
   const passedCount = challengeRows.filter((row) => row.passed).length;
   const challengeComplete = labels.length > 0 && passedCount === labels.length;
   const activeTarget = labels[targetGestureIndex] ?? null;
-
-  const challengeCoachText = useMemo(() => {
-    if (challengeComplete) {
-      return 'Challenge complete. Your model is consistent enough for demo time.';
-    }
-
-    const weakGestures = challengeRows
-      .filter((row) => row.attempts >= CHALLENGE_MIN_ATTEMPTS && !row.passed)
-      .map((row) => row.label.name);
-    if (weakGestures.length > 0) {
-      return `Retrain or recollect cleaner examples for: ${weakGestures.join(', ')}.`;
-    }
-
-    const inProgress = challengeRows
-      .filter((row) => row.attempts > 0 && row.attempts < CHALLENGE_MIN_ATTEMPTS)
-      .map((row) => row.label.name);
-    if (inProgress.length > 0) {
-      return `Keep running timed captures for: ${inProgress.join(', ')}.`;
-    }
-
-    return 'Pick a gesture target and run a timed capture.';
-  }, [challengeComplete, challengeRows]);
 
   const livePredictionView = useMemo(() => {
     if (currentPrediction === null) {
@@ -1117,6 +1138,12 @@ export function TestPage({
               )}
             </div>
 
+            <div className="mt-3 text-center text-sm text-slate-600">
+              {isRunning
+                ? `Session auto-ends in ${formatClock(sessionMsRemaining)}`
+                : `Each live testing session runs up to ${formatClock(LIVE_SESSION_MAX_MS)}.`}
+            </div>
+
             {liveError && (
               <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
                 {liveError}
@@ -1235,138 +1262,6 @@ export function TestPage({
               <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
                 Challenge complete. Your AI is ready for showcase testing.
               </div>
-            )}
-          </div>
-
-          <div className="card">
-            <h3 className="font-bold text-slate-800 mb-3">Per-Gesture Scoreboard</h3>
-            <div className="space-y-3">
-              {challengeRows.map((row) => {
-                const attemptProgress = Math.min(
-                  100,
-                  (row.attempts / CHALLENGE_MIN_ATTEMPTS) * 100,
-                );
-                const successProgress = row.attempts > 0 ? row.successRate * 100 : 0;
-                return (
-                  <div
-                    key={row.label.id}
-                    className={`rounded-xl border p-3 ${
-                      row.passed
-                        ? 'border-emerald-200 bg-emerald-50'
-                        : 'border-slate-200 bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="font-semibold text-slate-800">{row.label.name}</div>
-                      <div
-                        className={`text-xs font-bold ${
-                          row.passed ? 'text-emerald-700' : 'text-slate-500'
-                        }`}
-                      >
-                        {row.passed ? 'PASSED' : 'IN PROGRESS'}
-                      </div>
-                    </div>
-                    <div className="mt-2 flex items-center justify-between text-xs text-slate-600">
-                      <span>
-                        Attempts: {Math.min(row.attempts, CHALLENGE_MIN_ATTEMPTS)}/
-                        {CHALLENGE_MIN_ATTEMPTS}
-                      </span>
-                      <span>
-                        Successes: {row.successes}/{CHALLENGE_REQUIRED_SUCCESSES} target
-                      </span>
-                    </div>
-                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className="h-full bg-slate-400 transition-all duration-300"
-                        style={{ width: `${attemptProgress}%` }}
-                      />
-                    </div>
-                    <div className="mt-2 flex items-center justify-between text-xs text-slate-600">
-                      <span>Success rate</span>
-                      <span>{successProgress.toFixed(0)}%</span>
-                    </div>
-                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className={`h-full transition-all duration-300 ${
-                          successProgress >= CHALLENGE_TARGET_SUCCESS_RATE * 100
-                            ? 'bg-emerald-500'
-                            : 'bg-amber-500'
-                        }`}
-                        style={{ width: `${Math.min(100, successProgress)}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5">
-            <h3 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
-              <span className="text-xl">🧭</span> Coach
-            </h3>
-            <p className="text-sm text-blue-800 mb-3">{challengeCoachText}</p>
-            <ul className="space-y-2 text-sm text-blue-800">
-              <li>Tap once to run timed capture: ready phase, perform phase, then auto-score.</li>
-              <li>Hold the Arduino the same way you did during training.</li>
-              <li>Use consistent speed and range for each gesture.</li>
-              <li>Green confidence bar usually means cleaner class separation.</li>
-              {useArduinoInference && (
-                <li className="font-medium text-emerald-700">Model runs ON the Arduino.</li>
-              )}
-              <li>High-confidence count: {highConfidenceCount}/10</li>
-            </ul>
-          </div>
-
-          <div className="card h-full">
-            <button
-              onClick={() => setShowDistribution((open) => !open)}
-              className="w-full flex items-center justify-between text-left"
-            >
-              <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                <span className="text-xl">📈</span> Advanced Distribution
-              </h3>
-              <span className="text-sm font-medium text-slate-500">
-                {showDistribution ? 'Hide' : 'Show'}
-              </span>
-            </button>
-
-            {showDistribution && (
-              predictionHistory.length > 0 ? (
-                <div className="space-y-4 mt-4">
-                  {labels.map((label, idx) => {
-                    const count = predictionCounts[idx];
-                    const total = predictionHistory.length;
-                    const percentage = total > 0 ? (count / total) * 100 : 0;
-
-                    return (
-                      <div key={label.id}>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="font-bold text-slate-700">{label.name}</span>
-                          <span className="text-slate-500 text-xs">
-                            {count} ({percentage.toFixed(1)}%)
-                          </span>
-                        </div>
-                        <div className="bg-slate-100 rounded-full h-2 overflow-hidden">
-                          <div
-                            className="bg-primary-500 h-full transition-all duration-500"
-                            style={{ width: `${percentage}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <div className="pt-4 mt-4 border-t border-slate-100 text-center text-xs text-slate-400">
-                    Based on last {predictionHistory.length} predictions.
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center text-slate-400 py-8 text-sm">
-                  No predictions yet.
-                  <br />
-                  Start testing to populate this view.
-                </div>
-              )
             )}
           </div>
 
