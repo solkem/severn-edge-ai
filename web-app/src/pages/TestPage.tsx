@@ -1272,7 +1272,7 @@ export function TestPage({
                   onClick={onOpenPortfolio}
                   className="w-full bg-primary-50 hover:bg-primary-100 text-primary-700 font-bold py-3 px-6 rounded-xl transition-colors border border-primary-200"
                 >
-                  {challengeComplete ? 'Open Portfolio' : 'Skip to Portfolio'}
+                  Open Portfolio
                 </button>
               )}
               {onStartOver && (
