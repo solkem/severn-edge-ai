@@ -16,7 +16,6 @@ import { exportForArduino, modelToSimpleNNBytes } from '../services/modelExportS
 import { bleModelUploadService, UploadProgress } from '../services/bleModelUploadService';
 import { getBLEService } from '../services/bleService';
 import { IdleClassBanner } from '../components/IdleClassBanner';
-import { JournalPrompt } from '../components/JournalPrompt';
 import { useSessionStore } from '../state/sessionStore';
 
 interface TrainPageProps {
@@ -484,12 +483,6 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
                   </div>
                 </div>
               </div>
-
-              <JournalPrompt
-                prompt="after-train"
-                title="Training Reflection"
-                placeholder="What did you change to improve model accuracy?"
-              />
 
               <button onClick={handleNext} className="btn-success text-xl w-full py-4 shadow-xl shadow-emerald-200">
                 Next: Test It Out! 
