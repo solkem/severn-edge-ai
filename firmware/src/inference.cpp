@@ -17,8 +17,8 @@
 
 #include "inference.h"
 #include "flash_storage.h"
+#include "inference_features.h"
 #include "simple_nn.h"
-#include <math.h>
 
 // ============================================================================
 // Sliding Window Buffer
@@ -29,13 +29,6 @@
 // ============================================================================
 static float sampleBuffer[WINDOW_SIZE][6];  // 100 samples × 6 axes (normalized)
 static int sampleIndex = 0;
-
-// Normalization constants - MUST MATCH web app's trainingService.ts!
-// Web app divides accelerometer by 4.0 and gyroscope by 500.0
-// We receive values already scaled by ACCEL_SCALE (8192) and GYRO_SCALE (16.4)
-// So we need additional normalization to match training
-static const float NORM_ACCEL = 4.0f;   // Same as web app
-static const float NORM_GYRO = 500.0f;  // Same as web app
 
 // ============================================================================
 // SimpleNN Instance
@@ -70,29 +63,6 @@ static int findIdleClassIndex() {
     return -1;
 }
 
-static float estimateMotionScore() {
-    if (sampleIndex < 2) return 0.0f;
-
-    float accelDeltaMean = 0.0f;
-    float gyroMean = 0.0f;
-    int count = sampleIndex - 1;
-
-    for (int i = 1; i < sampleIndex; i++) {
-        accelDeltaMean += fabsf(sampleBuffer[i][0] - sampleBuffer[i - 1][0]);
-        accelDeltaMean += fabsf(sampleBuffer[i][1] - sampleBuffer[i - 1][1]);
-        accelDeltaMean += fabsf(sampleBuffer[i][2] - sampleBuffer[i - 1][2]);
-
-        gyroMean += fabsf(sampleBuffer[i][3]);
-        gyroMean += fabsf(sampleBuffer[i][4]);
-        gyroMean += fabsf(sampleBuffer[i][5]);
-    }
-
-    accelDeltaMean /= (float)(count * 3);
-    gyroMean /= (float)(count * 3);
-
-    return accelDeltaMean + gyroMean;
-}
-
 // ============================================================================
 // SETUP
 // ============================================================================
@@ -102,8 +72,7 @@ bool setupInference() {
     DEBUG_PRINTLN("(See docs/NEURAL_NETWORK_BASICS.md for how this works!)");
 
     // Reset buffer
-    sampleIndex = 0;
-    memset(sampleBuffer, 0, sizeof(sampleBuffer));
+    resetInferenceWindow();
 
     // Initialize flash storage
     initFlashStorage();
@@ -164,12 +133,12 @@ void addSample(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16
         //   Gyro: dps / 500.0 → roughly -1 to +1
         
         // Combined: raw / (SCALE * NORM)
-        sampleBuffer[sampleIndex][0] = (float)ax / (ACCEL_SCALE * NORM_ACCEL);
-        sampleBuffer[sampleIndex][1] = (float)ay / (ACCEL_SCALE * NORM_ACCEL);
-        sampleBuffer[sampleIndex][2] = (float)az / (ACCEL_SCALE * NORM_ACCEL);
-        sampleBuffer[sampleIndex][3] = (float)gx / (GYRO_SCALE * NORM_GYRO);
-        sampleBuffer[sampleIndex][4] = (float)gy / (GYRO_SCALE * NORM_GYRO);
-        sampleBuffer[sampleIndex][5] = (float)gz / (GYRO_SCALE * NORM_GYRO);
+        sampleBuffer[sampleIndex][0] = normalizeAccelSample(ax);
+        sampleBuffer[sampleIndex][1] = normalizeAccelSample(ay);
+        sampleBuffer[sampleIndex][2] = normalizeAccelSample(az);
+        sampleBuffer[sampleIndex][3] = normalizeGyroSample(gx);
+        sampleBuffer[sampleIndex][4] = normalizeGyroSample(gy);
+        sampleBuffer[sampleIndex][5] = normalizeGyroSample(gz);
         sampleIndex++;
     }
 }
@@ -180,6 +149,11 @@ bool isWindowReady() {
 
 int getSampleCount() {
     return sampleIndex;
+}
+
+void resetInferenceWindow() {
+    sampleIndex = 0;
+    memset(sampleBuffer, 0, sizeof(sampleBuffer));
 }
 
 // ============================================================================
@@ -197,8 +171,8 @@ int runInference(float* confidence) {
     // ========================================================================
     if (!neuralNetwork.isModelLoaded()) {
         DEBUG_PRINTLN("Inference (fallback mode - no trained model)");
-        *confidence = 0.50f;
-        return 0;
+        *confidence = 0.0f;
+        return -1;
     }
 
     // ========================================================================
@@ -234,9 +208,9 @@ int runInference(float* confidence) {
     // otherwise we can suppress real gestures (e.g., Shake) too aggressively.
     int idleClass = findIdleClassIndex();
     if (idleClass >= 0) {
-        const float motionScore = estimateMotionScore();
+        const float motionScore = estimateMotionScoreFromWindow(sampleBuffer, sampleIndex);
         // Handheld "still" is noisier than a table-resting board.
-        const float stillThreshold = 0.010f;
+        const float stillThreshold = MOTION_STILL_THRESHOLD;
         const float lowConfidenceThreshold = 0.60f;
 
         if (motionScore < stillThreshold) {

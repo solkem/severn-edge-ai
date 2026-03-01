@@ -12,6 +12,7 @@ import { useConnectionStore } from '../state/connectionStore';
 export type SensorDataCallback = (packet: SensorPacket) => void;
 export type InferenceCallback = (result: InferenceResult) => void;
 export type DisconnectCallback = () => void;
+export type ParseErrorCallback = (error: Error) => void;
 
 export class BLEService {
   private device: BluetoothDevice | null = null;
@@ -28,6 +29,7 @@ export class BLEService {
   private sensorCallback: SensorDataCallback | null = null;
   private inferenceCallback: InferenceCallback | null = null;
   private disconnectCallback: DisconnectCallback | null = null;
+  private parseErrorCallback: ParseErrorCallback | null = null;
 
   // Event handlers (stored so we can remove them)
   private sensorHandler: ((event: Event) => void) | null = null;
@@ -320,10 +322,19 @@ export class BLEService {
     this.inferenceHandler = (event: Event) => {
       const target = event.target as BluetoothRemoteGATTCharacteristic;
       if (!target.value) return;
-      const result = parseInferenceResult(target.value);
-
-      if (this.inferenceCallback) {
-        this.inferenceCallback(result);
+      try {
+        const result = parseInferenceResult(target.value);
+        if (this.inferenceCallback) {
+          this.inferenceCallback(result);
+        }
+      } catch (err) {
+        const parseError = err instanceof Error
+          ? err
+          : new Error('Failed to parse inference payload');
+        console.warn('Ignoring malformed inference payload:', parseError.message);
+        if (this.parseErrorCallback) {
+          this.parseErrorCallback(parseError);
+        }
       }
     };
 
@@ -368,6 +379,10 @@ export class BLEService {
 
   onDisconnect(callback: DisconnectCallback): void {
     this.disconnectCallback = callback;
+  }
+
+  onParseError(callback: ParseErrorCallback | null): void {
+    this.parseErrorCallback = callback;
   }
 
   private delay(ms: number): Promise<void> {

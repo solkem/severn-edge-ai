@@ -43,6 +43,17 @@ export interface PredictionResult {
   confidence: number;
 }
 
+export interface HoldoutCoverageWarning {
+  labelId: string;
+  labelName: string;
+  currentCount: number;
+  minimumRequired: number;
+  missingCount: number;
+  message: string;
+}
+
+export const MIN_TEST_SAMPLES_PER_CLASS = 2;
+
 function getSplit(sample: Sample): 'train' | 'test' {
   return sample.split === 'test' ? 'test' : 'train';
 }
@@ -110,6 +121,40 @@ export function createRecommendedTestSplit(
   }
 
   return next;
+}
+
+export function getHoldoutCoverageWarnings(
+  samples: Sample[],
+  labels: GestureLabel[],
+  minSamplesPerClass = MIN_TEST_SAMPLES_PER_CLASS,
+): HoldoutCoverageWarning[] {
+  if (minSamplesPerClass <= 0) {
+    return [];
+  }
+
+  const countsByLabel = new Map<string, number>();
+  for (const sample of samples) {
+    countsByLabel.set(sample.label, (countsByLabel.get(sample.label) ?? 0) + 1);
+  }
+
+  const warnings: HoldoutCoverageWarning[] = [];
+  for (const label of labels) {
+    const currentCount = countsByLabel.get(label.id) ?? 0;
+    if (currentCount >= minSamplesPerClass) {
+      continue;
+    }
+    const missingCount = minSamplesPerClass - currentCount;
+    warnings.push({
+      labelId: label.id,
+      labelName: label.name,
+      currentCount,
+      minimumRequired: minSamplesPerClass,
+      missingCount,
+      message: `"${label.name}" has too few samples to appear in the test results. Add at least ${missingCount} more sample${missingCount === 1 ? '' : 's'} before testing.`,
+    });
+  }
+
+  return warnings;
 }
 
 export function evaluateModelOnSamples(

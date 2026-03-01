@@ -10,7 +10,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseSensorPacket, parseDeviceInfo, parseInferenceResult } from './bleParser';
+import {
+  INFERENCE_PREDICTION_NO_MODEL,
+  INFERENCE_STATUS_NO_MODEL,
+  parseSensorPacket,
+  parseDeviceInfo,
+  parseInferenceResult,
+} from './bleParser';
 import { crc8 } from '../utils/crc8';
 
 // ---------------------------------------------------------------------------
@@ -149,6 +155,19 @@ describe('parseInferenceResult — short payload', () => {
     const result = parseInferenceResult(view);
     expect(result.prediction).toBe(2);
     expect(result.confidence).toBe(85);
+    expect(result.statusFlags).toBe(0);
+    expect(result.noModel).toBe(false);
+  });
+
+  it('should parse no-model marker from prediction/status flags', () => {
+    const buffer = new ArrayBuffer(4);
+    const view = new DataView(buffer);
+    view.setUint8(0, INFERENCE_PREDICTION_NO_MODEL);
+    view.setUint8(1, 0);
+    view.setUint8(2, INFERENCE_STATUS_NO_MODEL);
+
+    const result = parseInferenceResult(view);
+    expect(result.noModel).toBe(true);
   });
 
   it('should throw for a 0-byte payload', () => {

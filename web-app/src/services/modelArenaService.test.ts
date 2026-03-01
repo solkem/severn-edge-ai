@@ -5,6 +5,7 @@ import {
   createArenaSubmission,
   evaluateArenaBenchmarks,
   mergeArenaSubmissions,
+  parseArenaSubmissions,
   rankArenaSubmissions,
 } from './modelArenaService';
 
@@ -129,5 +130,72 @@ describe('modelArenaService', () => {
 
     const merged = mergeArenaSubmissions([lower], [higher, lower]);
     expect(merged.map((s) => s.id)).toEqual(['x-high', 'x-low']);
+  });
+
+  it('parses valid submissions from both root arrays and wrapped payloads', () => {
+    const payload = {
+      submissions: [
+        {
+          id: 's1',
+          studentName: 'Ada',
+          projectName: 'Gesture Bot',
+          createdAt: 123,
+          labels: ['Wave', 42, 'Fist'],
+          totalBenchmarks: 10,
+          overallAccuracy: 0.8,
+          generalizationAccuracy: 0.75,
+          genericAccuracy: 0.6,
+          arenaScore: 0.7,
+        },
+      ],
+    };
+
+    const parsedWrapped = parseArenaSubmissions(payload);
+    expect(parsedWrapped).toHaveLength(1);
+    expect(parsedWrapped[0]).toMatchObject({
+      id: 's1',
+      studentName: 'Ada',
+      projectName: 'Gesture Bot',
+      labels: ['Wave', 'Fist'],
+      arenaScore: 0.7,
+    });
+
+    const parsedArray = parseArenaSubmissions(payload.submissions);
+    expect(parsedArray).toHaveLength(1);
+    expect(parsedArray[0].id).toBe('s1');
+  });
+
+  it('drops malformed submission rows safely', () => {
+    const parsed = parseArenaSubmissions([
+      null,
+      {},
+      {
+        id: 'bad-created-at',
+        studentName: 'Ada',
+        projectName: 'Bad',
+        createdAt: Number.NaN,
+        labels: [],
+        totalBenchmarks: 5,
+        overallAccuracy: 0.5,
+        generalizationAccuracy: 0.5,
+        genericAccuracy: 0.5,
+        arenaScore: 0.5,
+      },
+      {
+        id: 'ok',
+        studentName: 'Lin',
+        projectName: 'Good',
+        createdAt: 456,
+        labels: ['Wave'],
+        totalBenchmarks: 8,
+        overallAccuracy: 0.75,
+        generalizationAccuracy: 0.7,
+        genericAccuracy: 0.6,
+        arenaScore: 0.68,
+      },
+    ]);
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].id).toBe('ok');
   });
 });

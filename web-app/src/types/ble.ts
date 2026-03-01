@@ -54,6 +54,8 @@ export interface DeviceInfo {
 export interface InferenceResult {
   prediction: number;    // Class index
   confidence: number;    // 0-100
+  statusFlags: number;   // Bitfield from firmware (0 when unused)
+  noModel: boolean;      // True when firmware has no model loaded
 }
 
 // ============================================================================

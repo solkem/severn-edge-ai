@@ -106,6 +106,11 @@ void setModelLabel(uint8_t classIndex, const char* label);
 UploadStatus finalizeModelUpload(uint32_t expectedCrc32);
 
 /**
+ * Cancel in-progress model upload and reset upload state to idle
+ */
+void cancelModelUpload();
+
+/**
  * Get current upload progress (0-100)
  */
 uint8_t getUploadProgress();

@@ -28,6 +28,9 @@ void addSample(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16
 // Check if we have enough samples for inference
 bool isWindowReady();
 
+// Reset the inference sliding window (used on mode transitions)
+void resetInferenceWindow();
+
 // Run inference on the current window
 // Returns: predicted class index
 // confidence: output parameter for confidence score (0.0-1.0)

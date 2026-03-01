@@ -57,6 +57,10 @@ export interface PredictionResult {
   confidence: number;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 const ARENA_GENERIC_VARIANTS_PER_SEED = 2;
 const ARENA_MAX_SEEDS_PER_LABEL = 3;
 
@@ -290,6 +294,54 @@ export function mergeArenaSubmissions(
     }
   }
   return rankArenaSubmissions([...byId.values()]);
+}
+
+export function parseArenaSubmissions(payload: unknown): ArenaSubmission[] {
+  let rows: unknown[] = [];
+  if (Array.isArray(payload)) {
+    rows = payload;
+  } else if (
+    payload &&
+    typeof payload === 'object' &&
+    Array.isArray((payload as { submissions?: unknown[] }).submissions)
+  ) {
+    rows = (payload as { submissions: unknown[] }).submissions;
+  }
+
+  const parsed: ArenaSubmission[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    const candidate = row as Partial<ArenaSubmission>;
+    if (
+      typeof candidate.id !== 'string' ||
+      typeof candidate.studentName !== 'string' ||
+      typeof candidate.projectName !== 'string' ||
+      !isFiniteNumber(candidate.createdAt) ||
+      !Array.isArray(candidate.labels) ||
+      !isFiniteNumber(candidate.totalBenchmarks) ||
+      !isFiniteNumber(candidate.overallAccuracy) ||
+      !isFiniteNumber(candidate.generalizationAccuracy) ||
+      !isFiniteNumber(candidate.genericAccuracy) ||
+      !isFiniteNumber(candidate.arenaScore)
+    ) {
+      continue;
+    }
+
+    parsed.push({
+      id: candidate.id,
+      studentName: candidate.studentName,
+      projectName: candidate.projectName,
+      createdAt: candidate.createdAt,
+      labels: candidate.labels.filter((entry): entry is string => typeof entry === 'string'),
+      totalBenchmarks: candidate.totalBenchmarks,
+      overallAccuracy: candidate.overallAccuracy,
+      generalizationAccuracy: candidate.generalizationAccuracy,
+      genericAccuracy: candidate.genericAccuracy,
+      arenaScore: candidate.arenaScore,
+    });
+  }
+
+  return parsed;
 }
 
 export function createArenaSubmission(input: {

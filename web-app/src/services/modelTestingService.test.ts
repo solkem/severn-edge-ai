@@ -3,6 +3,8 @@ import type { GestureLabel, Sample } from '../types';
 import {
   createRecommendedTestSplit,
   evaluateModelOnSamples,
+  getHoldoutCoverageWarnings,
+  MIN_TEST_SAMPLES_PER_CLASS,
   splitSamplesByDataset,
 } from './modelTestingService';
 
@@ -100,5 +102,28 @@ describe('modelTestingService', () => {
       precision: 0.5,
       recall: 0.5,
     });
+  });
+
+  it('returns warnings when one label has insufficient holdout coverage', () => {
+    const lockedTestSamples: Sample[] = [
+      makeSample('w1', 'wave', 10, 'test'),
+      makeSample('w2', 'wave', 11, 'test'),
+      makeSample('f1', 'fist', 12, 'test'),
+    ];
+
+    const warnings = getHoldoutCoverageWarnings(
+      lockedTestSamples,
+      LABELS,
+      MIN_TEST_SAMPLES_PER_CLASS,
+    );
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({
+      labelId: 'fist',
+      currentCount: 1,
+      minimumRequired: MIN_TEST_SAMPLES_PER_CLASS,
+      missingCount: 1,
+    });
+    expect(warnings[0].message).toContain('"Fist" has too few samples');
   });
 });

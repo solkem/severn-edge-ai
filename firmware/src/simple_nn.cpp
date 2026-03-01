@@ -10,7 +10,7 @@
  */
 
 #include "simple_nn.h"
-#include <math.h>
+#include "nn_math.h"
 
 // ============================================================================
 // CONSTRUCTOR
@@ -196,26 +196,7 @@ void SimpleNN::denseLayer(
     int outputSize,
     bool useRelu
 ) {
-    // For each output neuron...
-    for (int outIdx = 0; outIdx < outputSize; outIdx++) {
-        // Start with the bias
-        float sum = bias[outIdx];
-        
-        // Add up: input[j] × weight[outIdx][j] for all j
-        // Weights are stored as [outIdx * inputSize + inIdx]
-        const float* neuronWeights = &weights[outIdx * inputSize];
-        
-        for (int inIdx = 0; inIdx < inputSize; inIdx++) {
-            sum += input[inIdx] * neuronWeights[inIdx];
-        }
-        
-        // Apply activation function
-        if (useRelu) {
-            output[outIdx] = relu(sum);
-        } else {
-            output[outIdx] = sum;
-        }
-    }
+    denseLayerForward(input, output, weights, bias, inputSize, outputSize, useRelu);
 }
 
 // ============================================================================
@@ -234,25 +215,7 @@ void SimpleNN::denseLayer(
 // ============================================================================
 
 void SimpleNN::softmax(float* values, int size) {
-    // Step 1: Find maximum for numerical stability
-    float maxVal = values[0];
-    for (int i = 1; i < size; i++) {
-        if (values[i] > maxVal) {
-            maxVal = values[i];
-        }
-    }
-    
-    // Step 2 & 3: Compute exp(x - max) and sum
-    float sum = 0;
-    for (int i = 0; i < size; i++) {
-        values[i] = expf(values[i] - maxVal);
-        sum += values[i];
-    }
-    
-    // Step 4: Normalize to get probabilities
-    for (int i = 0; i < size; i++) {
-        values[i] /= sum;
-    }
+    softmaxInPlace(values, size);
 }
 
 // ============================================================================
@@ -260,15 +223,5 @@ void SimpleNN::softmax(float* values, int size) {
 // ============================================================================
 
 int SimpleNN::argmax(const float* values, int size) {
-    int maxIdx = 0;
-    float maxVal = values[0];
-    
-    for (int i = 1; i < size; i++) {
-        if (values[i] > maxVal) {
-            maxVal = values[i];
-            maxIdx = i;
-        }
-    }
-    
-    return maxIdx;
+    return argmaxIndex(values, size);
 }

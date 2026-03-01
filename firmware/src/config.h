@@ -65,6 +65,13 @@ static const DeviceMapping DEVICE_MAP[] = {
 // See docs/NEURAL_NETWORK_BASICS.md for details
 #define MODEL_CHUNK_SIZE 240 // BLE MTU-safe chunk size
 
+// Persistent model storage mode (future use).
+// Current implementation stores models in RAM only, so uploads are lost
+// on power cycle regardless of this flag.
+#ifndef PERSISTENT_MODEL
+#define PERSISTENT_MODEL 0
+#endif
+
 // ============================================================================
 // SIMPLENN CONFIGURATION
 // ============================================================================
@@ -101,6 +108,12 @@ static const DeviceMapping DEVICE_MAP[] = {
 #define WINDOW_STRIDE                                                          \
   5 // 0.2 sec @ 25Hz — must match web-app/src/config/constants.ts WINDOW_STRIDE
 #define NUM_CLASSES 3 // Default number of gesture classes
+
+// Inference packet metadata (4-byte inference characteristic)
+// [prediction, confidence, status_flags, reserved]
+#define INFERENCE_STATUS_NONE 0x00
+#define INFERENCE_STATUS_NO_MODEL 0x01
+#define INFERENCE_PREDICTION_NO_MODEL 0xFF
 
 // ============================================================================
 // OPERATING MODES

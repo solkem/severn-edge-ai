@@ -12,6 +12,8 @@ import { useSessionStore } from '../state/sessionStore';
 import {
   createRecommendedTestSplit,
   evaluateModelOnSamples,
+  getHoldoutCoverageWarnings,
+  MIN_TEST_SAMPLES_PER_CLASS,
   splitSamplesByDataset,
   type ModelTestingReport,
 } from '../services/modelTestingService';
@@ -20,10 +22,15 @@ import {
   createArenaSubmission,
   evaluateArenaBenchmarks,
   mergeArenaSubmissions,
+  parseArenaSubmissions,
   rankArenaSubmissions,
   type ArenaSubmission,
   type ArenaRunResult,
 } from '../services/modelArenaService';
+import {
+  evaluateCaptureWindow,
+  type InferenceFrame,
+} from '../services/captureEvaluationService';
 import {
   applyMotionHeuristic,
   normalizeConfidence,
@@ -47,6 +54,7 @@ const TIMED_CAPTURE_WINDOW_MS = 2000;
 const TIMED_CAPTURE_MIN_FRAMES = 8;
 // Required class support ratio to count a capture as consistent.
 const TIMED_CAPTURE_SUPPORT_THRESHOLD = 0.6;
+const TIMED_CAPTURE_IDLE_RATIO_FAILURE_THRESHOLD = 0.7;
 // Keep enough recent inference history to score delayed timed windows robustly.
 const INFERENCE_FRAME_BUFFER_MS = 20000;
 
@@ -55,12 +63,6 @@ type TestingMode = 'live' | 'model-testing' | 'arena';
 interface ChallengeStats {
   attempts: number;
   successes: number;
-}
-
-interface InferenceFrame {
-  timestamp: number;
-  prediction: number;
-  confidence: number;
 }
 
 interface TestingLockState {
@@ -116,54 +118,6 @@ function buildCountsByLabel(
     counts.set(sample.label, (counts.get(sample.label) ?? 0) + 1);
   }
   return counts;
-}
-
-function parseArenaSubmissions(payload: unknown): ArenaSubmission[] {
-  let rows: unknown[] = [];
-  if (Array.isArray(payload)) {
-    rows = payload;
-  } else if (
-    payload &&
-    typeof payload === 'object' &&
-    Array.isArray((payload as { submissions?: unknown[] }).submissions)
-  ) {
-    rows = (payload as { submissions: unknown[] }).submissions;
-  }
-
-  const parsed: ArenaSubmission[] = [];
-  for (const row of rows) {
-    if (!row || typeof row !== 'object') continue;
-    const candidate = row as Partial<ArenaSubmission>;
-    if (
-      typeof candidate.id !== 'string' ||
-      typeof candidate.studentName !== 'string' ||
-      typeof candidate.projectName !== 'string' ||
-      typeof candidate.createdAt !== 'number' ||
-      !Array.isArray(candidate.labels) ||
-      typeof candidate.totalBenchmarks !== 'number' ||
-      typeof candidate.overallAccuracy !== 'number' ||
-      typeof candidate.generalizationAccuracy !== 'number' ||
-      typeof candidate.genericAccuracy !== 'number' ||
-      typeof candidate.arenaScore !== 'number'
-    ) {
-      continue;
-    }
-
-    parsed.push({
-      id: candidate.id,
-      studentName: candidate.studentName,
-      projectName: candidate.projectName,
-      createdAt: candidate.createdAt,
-      labels: candidate.labels.filter((entry): entry is string => typeof entry === 'string'),
-      totalBenchmarks: candidate.totalBenchmarks,
-      overallAccuracy: candidate.overallAccuracy,
-      generalizationAccuracy: candidate.generalizationAccuracy,
-      genericAccuracy: candidate.genericAccuracy,
-      arenaScore: candidate.arenaScore,
-    });
-  }
-
-  return parsed;
 }
 
 interface TestPageProps {
@@ -300,6 +254,15 @@ export function TestPage({
     () => (testingLock.canEvaluate ? lockedTestingSnapshot.lockedSamples : []),
     [lockedTestingSnapshot.lockedSamples, testingLock.canEvaluate],
   );
+  const holdoutCoverageWarnings = useMemo(() => {
+    const sourceSamples = testingLock.canEvaluate
+      ? lockedTestingSnapshot.lockedSamples
+      : testingSamples;
+    if (sourceSamples.length === 0) {
+      return [];
+    }
+    return getHoldoutCoverageWarnings(sourceSamples, labels, MIN_TEST_SAMPLES_PER_CLASS);
+  }, [labels, lockedTestingSnapshot.lockedSamples, testingLock.canEvaluate, testingSamples]);
   const trainingCountsByLabel = useMemo(
     () => buildCountsByLabel(trainingSamples, labels),
     [labels, trainingSamples],
@@ -538,6 +501,14 @@ export function TestPage({
     try {
       if (useArduinoInference) {
         await ble.startInference((result: InferenceResult) => {
+          if (result.noModel) {
+            setCurrentPrediction(null);
+            setConfidence(0);
+            setLiveError('No model on device. Train and upload a model before live testing.');
+            return;
+          }
+
+          setLiveError(null);
           setCurrentPrediction(result.prediction);
           const normalizedConfidence = normalizeConfidence(result.confidence, 'arduino');
           setConfidence(normalizedConfidence);
@@ -612,115 +583,45 @@ export function TestPage({
     void stopTestingInternal();
   };
 
-  const evaluateCaptureWindow = (
+  const scoreTimedCaptureWindow = (
     startedAt: number,
     endedAt: number,
     targetIndex: number,
   ) => {
-    const target = labels[targetIndex];
-    if (!target) return;
-
-    const capturedFrames = inferenceFramesRef.current.filter(
-      (frame) => frame.timestamp >= startedAt && frame.timestamp <= endedAt,
+    const evaluation = evaluateCaptureWindow(
+      inferenceFramesRef.current,
+      labels,
+      targetIndex,
+      startedAt,
+      endedAt,
+      {
+        minFrames: TIMED_CAPTURE_MIN_FRAMES,
+        idleConfidenceThreshold: LIVE_IDLE_CONFIDENCE_THRESHOLD,
+        supportThreshold: TIMED_CAPTURE_SUPPORT_THRESHOLD,
+        minConfidence: CHALLENGE_MIN_CONFIDENCE,
+        idleRatioFailureThreshold: TIMED_CAPTURE_IDLE_RATIO_FAILURE_THRESHOLD,
+      },
     );
-    if (capturedFrames.length < TIMED_CAPTURE_MIN_FRAMES) {
-      setChallengeNote(
-        `Not enough signal in timed capture (${capturedFrames.length} frames). Try a bigger, cleaner gesture.`,
-      );
-      return;
+
+    const targetLabelId = evaluation.targetLabelId;
+    if (evaluation.countAttempt && targetLabelId) {
+      setChallengeStats((prev) => {
+        const existing = prev[targetLabelId] ?? { attempts: 0, successes: 0 };
+        return {
+          ...prev,
+          [targetLabelId]: {
+            attempts: existing.attempts + 1,
+            successes: existing.successes + (evaluation.isSuccess ? 1 : 0),
+          },
+        };
+      });
     }
 
-    const labelCounts = new Array(labels.length).fill(0);
-    const labelConfidenceSums = new Array(labels.length).fill(0);
-    let idleCount = 0;
-
-    for (const frame of capturedFrames) {
-      const isIdleFrame =
-        frame.prediction === labels.length
-        || frame.confidence < LIVE_IDLE_CONFIDENCE_THRESHOLD;
-      if (isIdleFrame) {
-        idleCount += 1;
-        continue;
-      }
-      if (frame.prediction >= 0 && frame.prediction < labels.length) {
-        labelCounts[frame.prediction] += 1;
-        labelConfidenceSums[frame.prediction] += frame.confidence;
-      }
+    if (evaluation.note) {
+      setChallengeNote(evaluation.note);
+    } else {
+      setChallengeNote(null);
     }
-
-    let bestLabelIndex = -1;
-    let bestVotes = -1;
-    let bestConfidenceSum = -1;
-    for (let idx = 0; idx < labels.length; idx += 1) {
-      if (
-        labelCounts[idx] > bestVotes
-        || (labelCounts[idx] === bestVotes && labelConfidenceSums[idx] > bestConfidenceSum)
-      ) {
-        bestVotes = labelCounts[idx];
-        bestConfidenceSum = labelConfidenceSums[idx];
-        bestLabelIndex = idx;
-      }
-    }
-
-    const support = bestVotes > 0 ? bestVotes / capturedFrames.length : 0;
-    const avgConfidence = bestVotes > 0 ? bestConfidenceSum / bestVotes : 0;
-    const idleRatio = idleCount / capturedFrames.length;
-    const predictedLabelName =
-      bestLabelIndex >= 0 && bestLabelIndex < labels.length
-        ? labels[bestLabelIndex].name
-        : 'Idle';
-
-    const isCorrectGesture = bestLabelIndex === targetIndex;
-    const hasSupport = support >= TIMED_CAPTURE_SUPPORT_THRESHOLD;
-    const isConfident = avgConfidence >= CHALLENGE_MIN_CONFIDENCE;
-    const isSuccess =
-      isCorrectGesture
-      && hasSupport
-      && isConfident
-      && idleRatio < 0.7;
-
-    setChallengeStats((prev) => {
-      const existing = prev[target.id] ?? { attempts: 0, successes: 0 };
-      return {
-        ...prev,
-        [target.id]: {
-          attempts: existing.attempts + 1,
-          successes: existing.successes + (isSuccess ? 1 : 0),
-        },
-      };
-    });
-
-    if (isSuccess) {
-      setChallengeNote(
-        `Great capture. "${target.name}" won ${formatPercent(support, 0)} of the timed window at ${formatPercent(avgConfidence, 0)} confidence.`,
-      );
-      return;
-    }
-
-    if (idleRatio >= 0.7) {
-      setChallengeNote(
-        `Mostly idle during timed capture (${formatPercent(idleRatio, 0)}). Repeat "${target.name}" with a larger motion.`,
-      );
-      return;
-    }
-
-    if (!isCorrectGesture) {
-      setChallengeNote(
-        `Captured as "${predictedLabelName}" (support ${formatPercent(support, 0)}). Match "${target.name}" more consistently.`,
-      );
-      return;
-    }
-
-    if (!hasSupport) {
-      setChallengeNote(
-        `Mixed capture for "${target.name}" (${formatPercent(support, 0)} support). Keep gesture shape steady during the whole timed window.`,
-      );
-      return;
-    }
-
-    setChallengeNote(
-      `Correct class but low confidence (${formatPercent(avgConfidence, 0)}). Repeat "${target.name}" more like your training samples.`,
-    );
   };
 
   const startTimedCapture = () => {
@@ -762,7 +663,7 @@ export function TestPage({
         const lockedTargetIndex = captureTargetIndexRef.current ?? targetGestureIndex;
         clearTimedCapture(false);
         if (windowStart === null) return;
-        evaluateCaptureWindow(windowStart, Date.now(), lockedTargetIndex);
+        scoreTimedCaptureWindow(windowStart, Date.now(), lockedTargetIndex);
       }, TIMED_CAPTURE_WINDOW_MS);
     }, TIMED_CAPTURE_PREP_MS);
   };
@@ -1426,6 +1327,19 @@ export function TestPage({
             {testingLock.message}
           </div>
 
+          {holdoutCoverageWarnings.length > 0 && (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-semibold">
+                Holdout coverage warning ({MIN_TEST_SAMPLES_PER_CLASS}+ per gesture recommended):
+              </p>
+              <ul className="mt-2 list-disc pl-5 space-y-1">
+                {holdoutCoverageWarnings.map((warning) => (
+                  <li key={warning.labelId}>{warning.message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {testingError && (
             <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
               {testingError}
@@ -1704,6 +1618,19 @@ export function TestPage({
           >
             {testingLock.message}
           </div>
+
+          {holdoutCoverageWarnings.length > 0 && (
+            <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-semibold">
+                Holdout coverage warning ({MIN_TEST_SAMPLES_PER_CLASS}+ per gesture recommended):
+              </p>
+              <ul className="mt-2 list-disc pl-5 space-y-1">
+                {holdoutCoverageWarnings.map((warning) => (
+                  <li key={warning.labelId}>{warning.message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {arenaError && (
             <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">

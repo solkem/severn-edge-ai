@@ -6,8 +6,8 @@
  *
  * Features:
  * - Over-the-air model upload via BLE
- * - Model persistence in flash memory
- * - Real-time inference with TFLite Micro
+ * - Runtime model storage in RAM (lost on power cycle)
+ * - Real-time inference with SimpleNN
  */
 
 #include "config.h"
@@ -102,7 +102,7 @@ BLEByteCharacteristic modeChar(MODE_CHAR_UUID, BLERead | BLEWrite);
 // Sensor data: 17-byte packets with CRC
 BLECharacteristic sensorChar(SENSOR_CHAR_UUID, BLERead | BLENotify, 17);
 
-// Inference results: [class, confidence%, reserved, reserved]
+// Inference results: [class, confidence%, status_flags, reserved]
 BLECharacteristic inferenceChar(INFERENCE_CHAR_UUID, BLERead | BLENotify, 4);
 
 // Device info: firmware version, chip type, stats (24 bytes - extended)
@@ -297,6 +297,10 @@ void handleModelUpload() {
 
   case 0x04: { // CANCEL: [cmd(1)]
     DEBUG_PRINTLN("Model upload cancelled");
+    cancelModelUpload();
+    uploadExpectedSize = 0;
+    uploadExpectedCrc = 0;
+    uploadNumClasses = 0;
     updateModelStatus(UPLOAD_IDLE, 0, STATUS_READY);
     break;
   }
@@ -429,6 +433,10 @@ void loop() {
         DEBUG_PRINT("Mode changed to: ");
         DEBUG_PRINTLN(currentMode == MODE_COLLECT ? "COLLECT" : "INFERENCE");
 
+        // Reset inference buffer on mode transitions so stale frames do not
+        // pollute first predictions after switching workflows.
+        resetInferenceWindow();
+
         // Update device info when mode changes
         updateDeviceInfo();
       }
@@ -471,7 +479,7 @@ void loop() {
                 uint8_t result[4];
                 result[0] = (uint8_t)prediction;
                 result[1] = (uint8_t)(confidence * 100);
-                result[2] = 0; // Reserved
+                result[2] = INFERENCE_STATUS_NONE;
                 result[3] = 0; // Reserved
 
                 inferenceChar.writeValue(result, 4);
@@ -482,6 +490,15 @@ void loop() {
                 DEBUG_PRINT(" (");
                 DEBUG_PRINT((int)(confidence * 100));
                 DEBUG_PRINTLN("%)");
+              } else if (!isModelLoaded()) {
+                // Explicit no-model signal for the web app UI.
+                uint8_t result[4];
+                result[0] = INFERENCE_PREDICTION_NO_MODEL;
+                result[1] = 0;
+                result[2] = INFERENCE_STATUS_NO_MODEL;
+                result[3] = 0;
+
+                inferenceChar.writeValue(result, 4);
               }
 
               // Slide window for next inference

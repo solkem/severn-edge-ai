@@ -7,6 +7,9 @@ import type { SensorPacket, DeviceInfo, InferenceResult } from '../types/ble';
 import { SENSOR_SCALE } from '../config/constants';
 import { validatePacketCRC } from '../utils/crc8';
 
+export const INFERENCE_PREDICTION_NO_MODEL = 0xFF;
+export const INFERENCE_STATUS_NO_MODEL = 0x01;
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -98,9 +101,18 @@ export function parseInferenceResult(data: DataView): InferenceResult {
     throw new Error(`Invalid inference result size: ${data.byteLength} (expected >= 2)`);
   }
 
+  const prediction = data.getUint8(0);
+  const confidence = data.getUint8(1);
+  const statusFlags = data.byteLength >= 3 ? data.getUint8(2) : 0;
+  const noModel =
+    prediction === INFERENCE_PREDICTION_NO_MODEL
+    || (statusFlags & INFERENCE_STATUS_NO_MODEL) !== 0;
+
   return {
-    prediction: data.getUint8(0),
-    confidence: data.getUint8(1),  // Already in 0-100 range
+    prediction,
+    confidence,  // Already in 0-100 range
+    statusFlags,
+    noModel,
   };
 }
 

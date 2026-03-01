@@ -1,6 +1,6 @@
 # Severn Edge AI - Arduino Firmware
 
-BLE-enabled firmware for gesture recognition using TensorFlow Lite Micro.
+BLE-enabled firmware for gesture recognition using SimpleNN.
 
 ## Supported Hardware
 
@@ -11,10 +11,12 @@ BLE-enabled firmware for gesture recognition using TensorFlow Lite Micro.
 
 - Hardware abstraction layer (works with both Rev1 and Rev2)
 - CRC-8 protected BLE packets
+- OTA model upload over BLE (SimpleNN weights)
+- Runtime model storage in RAM (upload required after power cycle)
 - Two operating modes:
   - **Collect Mode**: Stream sensor data for training
   - **Inference Mode**: Run on-device ML predictions
-- Sliding window inference (100 samples, 50-sample stride)
+- Sliding window inference (100 samples, 5-sample stride)
 - 25Hz sample rate (configurable)
 
 ## Building with PlatformIO
@@ -99,7 +101,9 @@ firmware/
 │   ├── sensor_reader.h    # Hardware abstraction interface
 │   ├── sensor_bmi270.cpp  # Rev2 sensor implementation
 │   ├── sensor_lsm9ds1.cpp # Rev1 sensor implementation
-│   ├── inference.h        # TFLite inference interface
+│   ├── simple_nn.cpp/h    # SimpleNN inference math
+│   ├── flash_storage.cpp/h # RAM model upload buffer + validation
+│   ├── inference.h        # Inference interface
 │   └── inference.cpp      # Inference engine
 └── lib/                   # External libraries (managed by PlatformIO)
 ```
@@ -110,8 +114,8 @@ Edit [src/config.h](src/config.h) to customize:
 
 - `DEFAULT_SAMPLE_RATE_HZ` - Sample rate (10-50Hz)
 - `WINDOW_SIZE` - Inference window size (default: 100)
-- `WINDOW_STRIDE` - Sliding window stride (default: 50)
-- `TENSOR_ARENA_SIZE` - TFLite memory (default: 12KB)
+- `WINDOW_STRIDE` - Sliding window stride (default: 5)
+- `PERSISTENT_MODEL` - Future-use flag; current storage remains RAM-only
 
 ## Debugging
 

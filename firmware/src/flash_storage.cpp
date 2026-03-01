@@ -6,8 +6,15 @@
  * ============================================================================
  * 
  * Uses RAM buffer for storing trained neural network models.
- * The model is lost on power cycle - for persistent storage on
- * nRF52840, you would need to use the internal flash API.
+ * The model is lost on power cycle.
+ *
+ * IMPORTANT:
+ * PERSISTENT_MODEL is defined for future feature work only. This file does
+ * not currently implement nRF52840 flash read/write. To keep classroom
+ * behavior predictable, startup always clears model state.
+ * 
+ * For persistent storage in the future, implement flash-backed load/save
+ * paths and remove the startup wipe in initFlashStorage().
  * 
  * See docs/NEURAL_NETWORK_BASICS.md for details on the SimpleNN format.
  */
@@ -102,7 +109,11 @@ void initFlashStorage() {
     sprintf(testBuf, "CRC32 test: 'hello' = 0x%08lX (expected 0x3610A686)", (unsigned long)testCrc);
     DEBUG_PRINTLN(testBuf);
     
-    // Clear the storage on init (RAM-based, so no persistence)
+    #if PERSISTENT_MODEL
+    DEBUG_PRINTLN("WARNING: PERSISTENT_MODEL=1 set, but flash persistence is not implemented yet.");
+    #endif
+
+    // Clear storage on init (RAM-based model buffer, non-persistent).
     memset(&storedModel, 0, sizeof(storedModel));
     hasModel = false;
     
@@ -324,6 +335,13 @@ UploadStatus finalizeModelUpload(uint32_t expectedCrc32) {
     DEBUG_PRINTLN(storedModel.numClasses);
     
     return STATUS_SUCCESS;
+}
+
+void cancelModelUpload() {
+    currentUploadState = UPLOAD_IDLE;
+    bytesReceived = 0;
+    expectedSize = 0;
+    uploadNumClasses = 0;
 }
 
 uint8_t getUploadProgress() {

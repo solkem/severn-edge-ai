@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSensorPacket, parseDeviceInfo } from './bleParser';
+import { parseSensorPacket, parseDeviceInfo, parseInferenceResult } from './bleParser';
 import { crc8 } from '../utils/crc8';
 
 describe('BLE Parser', () => {
@@ -103,6 +103,21 @@ describe('BLE Parser', () => {
       expect(info.uptimeSec).toBe(3600);
       expect(info.totalSamples).toBe(10000);
       expect(info.inferenceCount).toBe(500);
+    });
+  });
+
+  describe('parseInferenceResult', () => {
+    it('should parse inference payload with default flags', () => {
+      const buffer = new ArrayBuffer(2);
+      const view = new DataView(buffer);
+      view.setUint8(0, 2);
+      view.setUint8(1, 85);
+
+      const result = parseInferenceResult(view);
+      expect(result.prediction).toBe(2);
+      expect(result.confidence).toBe(85);
+      expect(result.statusFlags).toBe(0);
+      expect(result.noModel).toBe(false);
     });
   });
 });
