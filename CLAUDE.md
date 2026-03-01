@@ -110,7 +110,7 @@ The complete pipeline:
 export const MODEL_CONFIG = {
   WINDOW_SIZE: 100,      // 100 samples per inference window
   NUM_AXES: 6,           // ax, ay, az, gx, gy, gz
-  WINDOW_STRIDE: 25,     // Samples between predictions
+  WINDOW_STRIDE: 5,      // 0.2 sec @ 25Hz — must match firmware config.h and web-app constants.ts
 };
 export const NN_HIDDEN_SIZE = 32;  // Hidden layer neurons
 ```
@@ -118,7 +118,7 @@ export const NN_HIDDEN_SIZE = 32;  // Hidden layer neurons
 **Firmware** (`firmware/src/config.h`):
 ```cpp
 #define WINDOW_SIZE 100
-#define WINDOW_STRIDE 25
+#define WINDOW_STRIDE 5
 #define NN_HIDDEN_SIZE 32
 #define NN_INPUT_SIZE 600  // 100 * 6
 ```

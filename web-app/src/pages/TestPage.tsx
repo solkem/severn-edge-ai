@@ -24,6 +24,10 @@ import {
   type ArenaSubmission,
   type ArenaRunResult,
 } from '../services/modelArenaService';
+import {
+  applyMotionHeuristic,
+  normalizeConfidence,
+} from '../services/inferenceUtils';
 
 const CHALLENGE_MIN_ATTEMPTS = 10;
 const CHALLENGE_TARGET_SUCCESS_RATE = 0.8;
@@ -35,10 +39,15 @@ const LIVE_IDLE_CONFIDENCE_THRESHOLD = 0.55;
 const ARENA_LEADERBOARD_STORAGE_KEY = 'severn-edge-ai-arena-v1';
 const ARENA_MAX_LEADERBOARD_ROWS = 200;
 const LIVE_SESSION_MAX_MS = 2 * 60 * 1000;
+// Timed cue before scoring so students can get into position.
 const TIMED_CAPTURE_PREP_MS = 1200;
+// Fixed capture duration that balances gesture completion and attention span.
 const TIMED_CAPTURE_WINDOW_MS = 2000;
+// Minimum frames needed for stable vote/support statistics at classroom sample rates.
 const TIMED_CAPTURE_MIN_FRAMES = 8;
+// Required class support ratio to count a capture as consistent.
 const TIMED_CAPTURE_SUPPORT_THRESHOLD = 0.6;
+// Keep enough recent inference history to score delayed timed windows robustly.
 const INFERENCE_FRAME_BUFFER_MS = 20000;
 
 type TestingMode = 'live' | 'model-testing' | 'arena';
@@ -530,7 +539,7 @@ export function TestPage({
       if (useArduinoInference) {
         await ble.startInference((result: InferenceResult) => {
           setCurrentPrediction(result.prediction);
-          const normalizedConfidence = result.confidence / 100;
+          const normalizedConfidence = normalizeConfidence(result.confidence, 'arduino');
           setConfidence(normalizedConfidence);
           appendInferenceFrame(result.prediction, normalizedConfidence);
           if (result.confidence >= 80) {
@@ -551,12 +560,37 @@ export function TestPage({
           ]);
 
           if (sampleBuffer.length >= MODEL_CONFIG.WINDOW_SIZE) {
-            const result = trainingService.predict(
+            const rawResult = trainingService.predict(
               sampleBuffer.slice(-MODEL_CONFIG.WINDOW_SIZE),
             );
-            setCurrentPrediction(result.prediction);
-            setConfidence(result.confidence);
-            appendInferenceFrame(result.prediction, result.confidence);
+
+            const idleClassIndexFromLabels = labels.findIndex(
+              (label) => label.name.trim().toLowerCase() === 'idle',
+            );
+            const modelOutputClasses = trainingService.getModel()?.outputShape?.[1];
+            const hasExtraClass =
+              typeof modelOutputClasses === 'number' && modelOutputClasses > labels.length;
+            const idleClassIndex = idleClassIndexFromLabels >= 0
+              ? idleClassIndexFromLabels
+              : hasExtraClass
+                ? labels.length
+                : -1;
+
+            const heuristicallyAdjusted = idleClassIndex >= 0
+              ? applyMotionHeuristic(
+                sampleBuffer.slice(-MODEL_CONFIG.WINDOW_SIZE),
+                rawResult,
+                idleClassIndex,
+              )
+              : rawResult;
+
+            const normalizedConfidence = normalizeConfidence(
+              heuristicallyAdjusted.confidence,
+              'browser',
+            );
+            setCurrentPrediction(heuristicallyAdjusted.prediction);
+            setConfidence(normalizedConfidence);
+            appendInferenceFrame(heuristicallyAdjusted.prediction, normalizedConfidence);
             sampleBuffer.splice(0, sampleBuffer.length - MODEL_CONFIG.WINDOW_STRIDE);
           }
         });

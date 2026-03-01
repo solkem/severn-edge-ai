@@ -99,7 +99,7 @@ static const DeviceMapping DEVICE_MAP[] = {
 // ============================================================================
 #define WINDOW_SIZE 100 // Number of samples in sliding window
 #define WINDOW_STRIDE                                                          \
-  5 // Samples to slide after inference (0.2 sec @ 25Hz = faster response)
+  5 // 0.2 sec @ 25Hz — must match web-app/src/config/constants.ts WINDOW_STRIDE
 #define NUM_CLASSES 3 // Default number of gesture classes
 
 // ============================================================================

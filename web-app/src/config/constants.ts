@@ -49,7 +49,7 @@ export const COLLECTION_CONFIG = {
 export const MODEL_CONFIG = {
   WINDOW_SIZE: 100,
   NUM_AXES: 6,
-  WINDOW_STRIDE: 5, // For inference sliding window (~0.2s updates at 25Hz)
+  WINDOW_STRIDE: 5, // 0.2 sec @ 25Hz — must match firmware/src/config.h WINDOW_STRIDE
   EPOCHS: 50, // Default training epochs
 };
 
