@@ -29,7 +29,7 @@ import {
 } from './data/knowledgeChecks';
 import type { CheckpointId } from './storage/schema';
 
-type CollectFlow = 'initial' | 'test-holdout';
+
 
 function withTotalSampleCounts(
   labels: GestureLabel[],
@@ -50,7 +50,7 @@ function App() {
   const [trainingService, setTrainingService] = useState<TrainingService | null>(null);
   const [activeCheck, setActiveCheck] = useState<KnowledgeCheck | null>(null);
   const [pendingStage, setPendingStage] = useState<AppStageType | null>(null);
-  const [collectFlow, setCollectFlow] = useState<CollectFlow>('initial');
+
 
   const initializeSession = useSessionStore((state) => state.initialize);
   const session = useSessionStore((state) => state.session);
@@ -128,7 +128,6 @@ function App() {
   };
 
   const handlePreviewReady = () => {
-    setCollectFlow('initial');
     requestGate('gate-1-sensor', AppStage.COLLECT);
   };
 
@@ -139,10 +138,6 @@ function App() {
     const normalizedLabels = withTotalSampleCounts(collectedLabels, collectedSamples);
     setSessionGestures(normalizedLabels);
     await setSessionSamples(collectedSamples);
-    if (collectFlow === 'test-holdout') {
-      goToStage(AppStage.TEST);
-      return;
-    }
     if (normalizedLabels.length > 0 && normalizedLabels.every((l) => l.sampleCount >= 10)) {
       addBadge('data-scientist');
     }
@@ -167,17 +162,13 @@ function App() {
     requestGate('gate-4-edge-ai', nextStage);
   };
 
-  const handleRecordTestData = () => {
-    setCollectFlow('test-holdout');
-    goToStage(AppStage.COLLECT);
-  };
+
 
   const handleStartOver = () => {
     setSessionStage(AppStage.CONNECT);
     void startFresh();
     setDeviceInfo(null);
     setTrainingService(null);
-    setCollectFlow('initial');
     setActiveCheck(null);
     setPendingStage(null);
     clearResumeStage();
@@ -285,12 +276,6 @@ function App() {
         {stage === AppStage.COLLECT && (
           <CollectPage
             onComplete={handleCollectComplete}
-            initialLabels={collectFlow === 'test-holdout' ? labels : undefined}
-            initialSamples={collectFlow === 'test-holdout' ? samples : undefined}
-            targetSplit={collectFlow === 'test-holdout' ? 'test' : 'train'}
-            appendMode={collectFlow === 'test-holdout'}
-            requiredSamplesPerGesture={collectFlow === 'test-holdout' ? 3 : undefined}
-            onCancel={collectFlow === 'test-holdout' ? () => goToStage(AppStage.TEST) : undefined}
           />
         )}
 
@@ -304,7 +289,6 @@ function App() {
             trainingService={trainingService}
             onStartOver={handleStartOver}
             onOpenPortfolio={handleOpenPortfolio}
-            onRecordTestData={handleRecordTestData}
           />
         )}
 
