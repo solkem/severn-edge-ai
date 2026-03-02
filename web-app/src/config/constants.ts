@@ -36,10 +36,10 @@ export const BLE_UUIDS = {
 // ============================================================================
 export const COLLECTION_CONFIG = {
   SAMPLE_DURATION_MS: 4000, // 4 seconds per sample
-  SAMPLES_PER_GESTURE: 20,
-  DEFAULT_GESTURES: ['Wave', 'Shake', 'Circle'],
-  MIN_GESTURES: 1,            // Allow single gesture (softmax trivial, but enables fast testing)
-  MAX_GESTURES: 8,            // Matches firmware NN_MAX_CLASSES
+  SAMPLES_PER_GESTURE: 15,
+  DEFAULT_GESTURES: ["Wave", "Shake", "Circle"],
+  MIN_GESTURES: 1, // Allow single gesture (softmax trivial, but enables fast testing)
+  MAX_GESTURES: 8, // Matches firmware NN_MAX_CLASSES
   MAX_GESTURE_NAME_LENGTH: 15, // BLE label name limit
 };
 
@@ -57,11 +57,11 @@ export const MODEL_CONFIG = {
 // SimpleNN Configuration
 // MUST MATCH firmware/src/config.h values exactly!
 // ============================================================================
-export const NN_INPUT_SIZE = 600;    // 100 samples * 6 axes
-export const NN_HIDDEN_SIZE = 32;    // Hidden layer neurons
-export const NN_MAX_CLASSES = 8;     // Maximum gesture classes
-export const LABEL_MAX_LEN = 16;     // Must match firmware LABEL_MAX_LEN
-export const SIMPLE_NN_MAGIC = 0x4E4E4E53; // "SNNN" in little-endian bytes
+export const NN_INPUT_SIZE = 600; // 100 samples * 6 axes
+export const NN_HIDDEN_SIZE = 32; // Hidden layer neurons
+export const NN_MAX_CLASSES = 8; // Maximum gesture classes
+export const LABEL_MAX_LEN = 16; // Must match firmware LABEL_MAX_LEN
+export const SIMPLE_NN_MAGIC = 0x4e4e4e53; // "SNNN" in little-endian bytes
 
 // ============================================================================
 // Sensor Scaling
