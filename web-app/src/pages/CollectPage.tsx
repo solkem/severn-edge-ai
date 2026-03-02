@@ -126,6 +126,19 @@ interface CollectPageProps {
   onCancel?: () => void;
 }
 
+export function resolveSamplesPerGestureGoal(
+  targetSplit: 'train' | 'test',
+  appendMode: boolean,
+  requiredSamplesPerGesture?: number,
+): number {
+  if (targetSplit === 'train') {
+    return COLLECTION_CONFIG.SAMPLES_PER_GESTURE;
+  }
+
+  const fallbackTestGoal = appendMode ? 3 : COLLECTION_CONFIG.SAMPLES_PER_GESTURE;
+  return requiredSamplesPerGesture ?? fallbackTestGoal;
+}
+
 function getTimestampMs(): number {
   return Date.now();
 }
@@ -198,8 +211,14 @@ export function CollectPage({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingProgress, setRecordingProgress] = useState(0);
   const [feedback, setFeedback] = useState<FeedbackStatus>('recording');
-  const samplesPerGestureGoal = requiredSamplesPerGesture
-    ?? (appendMode ? 3 : COLLECTION_CONFIG.SAMPLES_PER_GESTURE);
+  const resolvedSamplesPerGestureGoal = resolveSamplesPerGestureGoal(
+    targetSplit,
+    appendMode,
+    requiredSamplesPerGesture,
+  );
+  const samplesPerGestureGoal = targetSplit === 'train'
+    ? COLLECTION_CONFIG.SAMPLES_PER_GESTURE
+    : resolvedSamplesPerGestureGoal;
 
   // Gesture setup phase
   const [isSetupComplete, setIsSetupComplete] = useState(
@@ -479,6 +498,12 @@ export function CollectPage({
                   <p className="text-slate-600">
                     Record {samplesPerGestureGoal} {targetSplit} examples of each gesture.
                   </p>
+                  {targetSplit === 'train' && !appendMode && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Default training goal: {COLLECTION_CONFIG.SAMPLES_PER_GESTURE} samples per
+                      gesture.
+                    </p>
+                  )}
                 </div>
                 <div className="hidden sm:flex items-center gap-2">
                   {onCancel && (

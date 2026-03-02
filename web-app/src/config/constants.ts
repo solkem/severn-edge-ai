@@ -36,7 +36,7 @@ export const BLE_UUIDS = {
 // ============================================================================
 export const COLLECTION_CONFIG = {
   SAMPLE_DURATION_MS: 4000, // 4 seconds per sample
-  SAMPLES_PER_GESTURE: 20,
+  SAMPLES_PER_GESTURE: 15,
   DEFAULT_GESTURES: ['Wave', 'Shake', 'Circle'],
   MIN_GESTURES: 1,            // Allow single gesture (softmax trivial, but enables fast testing)
   MAX_GESTURES: 8,            // Matches firmware NN_MAX_CLASSES

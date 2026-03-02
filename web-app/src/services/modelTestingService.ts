@@ -12,6 +12,7 @@ export interface EvaluatedSample {
   predictedLabelId: string | null;
   predictedLabelName: string;
   confidence: number;
+  isUncertain: boolean;
   correct: boolean;
 }
 
@@ -33,6 +34,11 @@ export interface ModelTestingReport {
   accuracy: number;
   macroF1: number;
   meanConfidence: number;
+  uncertaintyThreshold: number;
+  uncertainSamples: number;
+  uncertainRate: number;
+  highConfidenceSamples: number;
+  highConfidenceAccuracy: number;
   confusionMatrix: number[][];
   labelMetrics: LabelMetrics[];
   sampleResults: EvaluatedSample[];
@@ -41,6 +47,10 @@ export interface ModelTestingReport {
 export interface PredictionResult {
   prediction: number;
   confidence: number;
+}
+
+export interface ModelTestingOptions {
+  uncertaintyThreshold?: number;
 }
 
 function getSplit(sample: Sample): 'train' | 'test' {
@@ -112,11 +122,46 @@ export function createRecommendedTestSplit(
   return next;
 }
 
+
+export function createBalancedSampledTestSet(
+  samples: Sample[],
+  labels: GestureLabel[],
+  perLabel = 3,
+): Sample[] {
+  const boundedPerLabel = Math.max(1, Math.floor(perLabel));
+  const groups = new Map<string, Sample[]>();
+
+  for (const label of labels) {
+    groups.set(label.id, []);
+  }
+
+  for (const sample of samples) {
+    const group = groups.get(sample.label);
+    if (group) {
+      group.push(sample);
+    }
+  }
+
+  const selected: Sample[] = [];
+  for (const label of labels) {
+    const group = groups.get(label.id) ?? [];
+    const ordered = [...group].sort((a, b) => b.timestamp - a.timestamp);
+    selected.push(...ordered.slice(0, boundedPerLabel));
+  }
+
+  return selected;
+}
+
 export function evaluateModelOnSamples(
   samples: Sample[],
   labels: GestureLabel[],
   predict: (sampleData: number[][]) => PredictionResult,
+  options: ModelTestingOptions = {},
 ): ModelTestingReport {
+  const uncertaintyThreshold = Math.max(
+    0,
+    Math.min(1, options.uncertaintyThreshold ?? 0.7),
+  );
   const labelToIndex = new Map(labels.map((label, idx) => [label.id, idx]));
   const confusionMatrix = labels.map(() => new Array(labels.length).fill(0));
   const supportCounts = new Array(labels.length).fill(0);
@@ -124,6 +169,9 @@ export function evaluateModelOnSamples(
   let totalSamples = 0;
   let correctSamples = 0;
   let confidenceSum = 0;
+  let uncertainSamples = 0;
+  let highConfidenceSamples = 0;
+  let highConfidenceCorrect = 0;
 
   for (const sample of samples) {
     const expectedIndex = labelToIndex.get(sample.label);
@@ -139,11 +187,20 @@ export function evaluateModelOnSamples(
       predictedIndex >= 0 && predictedIndex < labels.length ? predictedIndex : -1;
 
     const confidence = Math.max(0, Math.min(1, rawPrediction.confidence || 0));
+    const isUncertain = confidence < uncertaintyThreshold;
     const correct = validPrediction === expectedIndex;
 
     totalSamples += 1;
     supportCounts[expectedIndex] += 1;
     confidenceSum += confidence;
+    if (isUncertain) {
+      uncertainSamples += 1;
+    } else {
+      highConfidenceSamples += 1;
+      if (correct) {
+        highConfidenceCorrect += 1;
+      }
+    }
     if (correct) {
       correctSamples += 1;
     }
@@ -159,6 +216,7 @@ export function evaluateModelOnSamples(
       predictedLabelId: validPrediction >= 0 ? labels[validPrediction].id : null,
       predictedLabelName: validPrediction >= 0 ? labels[validPrediction].name : 'Unknown',
       confidence,
+      isUncertain,
       correct,
     });
   }
@@ -199,6 +257,9 @@ export function evaluateModelOnSamples(
       ? labelMetrics.reduce((sum, metric) => sum + metric.f1, 0) / labelMetrics.length
       : 0;
   const meanConfidence = totalSamples > 0 ? confidenceSum / totalSamples : 0;
+  const uncertainRate = totalSamples > 0 ? uncertainSamples / totalSamples : 0;
+  const highConfidenceAccuracy =
+    highConfidenceSamples > 0 ? highConfidenceCorrect / highConfidenceSamples : 0;
 
   return {
     totalSamples,
@@ -206,6 +267,11 @@ export function evaluateModelOnSamples(
     accuracy: roundMetric(accuracy),
     macroF1: roundMetric(macroF1),
     meanConfidence: roundMetric(meanConfidence),
+    uncertaintyThreshold: roundMetric(uncertaintyThreshold),
+    uncertainSamples,
+    uncertainRate: roundMetric(uncertainRate),
+    highConfidenceSamples,
+    highConfidenceAccuracy: roundMetric(highConfidenceAccuracy),
     confusionMatrix,
     labelMetrics,
     sampleResults,

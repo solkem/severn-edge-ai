@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GestureLabel, Sample } from '../types';
 import {
+  createBalancedSampledTestSet,
   createRecommendedTestSplit,
   evaluateModelOnSamples,
   splitSamplesByDataset,
@@ -28,6 +29,21 @@ function makeSample(
 }
 
 describe('modelTestingService', () => {
+
+  it('creates a balanced sampled test set with a fixed cap per label', () => {
+    const samples: Sample[] = [
+      ...Array.from({ length: 5 }, (_, i) => makeSample(`wave-${i}`, 'wave', i + 1, 'test')),
+      ...Array.from({ length: 2 }, (_, i) => makeSample(`fist-${i}`, 'fist', 100 + i, 'test')),
+    ];
+
+    const sampled = createBalancedSampledTestSet(samples, LABELS, 3);
+    const wave = sampled.filter((sample) => sample.label === 'wave').map((sample) => sample.id);
+    const fist = sampled.filter((sample) => sample.label === 'fist').map((sample) => sample.id);
+
+    expect(wave).toEqual(['wave-4', 'wave-3', 'wave-2']);
+    expect(fist).toEqual(['fist-1', 'fist-0']);
+  });
+
   it('treats undefined split as training data', () => {
     const samples: Sample[] = [
       makeSample('s1', 'wave', 1),
@@ -81,6 +97,11 @@ describe('modelTestingService', () => {
       [1, 1],
       [0, 1],
     ]);
+    expect(report.uncertaintyThreshold).toBe(0.7);
+    expect(report.uncertainSamples).toBe(2);
+    expect(report.uncertainRate).toBe(0.5);
+    expect(report.highConfidenceSamples).toBe(2);
+    expect(report.highConfidenceAccuracy).toBe(1);
 
     const waveMetrics = report.labelMetrics.find((m) => m.labelId === 'wave');
     const fistMetrics = report.labelMetrics.find((m) => m.labelId === 'fist');
@@ -100,5 +121,30 @@ describe('modelTestingService', () => {
       precision: 0.5,
       recall: 0.5,
     });
+
+    expect(report.sampleResults.map((result) => result.isUncertain)).toEqual([
+      false,
+      true,
+      false,
+      true,
+    ]);
+  });
+
+  it('supports custom uncertainty threshold for evaluation', () => {
+    const samples: Sample[] = [
+      makeSample('a1', 'wave', 1, 'test'),
+      makeSample('a2', 'wave', 2, 'test'),
+    ];
+
+    const report = evaluateModelOnSamples(
+      samples,
+      LABELS,
+      () => ({ prediction: 0, confidence: 0.6 }),
+      { uncertaintyThreshold: 0.5 },
+    );
+
+    expect(report.uncertainSamples).toBe(0);
+    expect(report.highConfidenceSamples).toBe(2);
+    expect(report.highConfidenceAccuracy).toBe(1);
   });
 });

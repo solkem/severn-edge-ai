@@ -10,6 +10,7 @@ import { getBLEService } from '../services/bleService';
 import { EdgeAIFactsPanel } from '../components/EdgeAIFactsPanel';
 import { useSessionStore } from '../state/sessionStore';
 import {
+  createBalancedSampledTestSet,
   createRecommendedTestSplit,
   evaluateModelOnSamples,
   splitSamplesByDataset,
@@ -40,8 +41,11 @@ const TIMED_CAPTURE_WINDOW_MS = 2000;
 const TIMED_CAPTURE_MIN_FRAMES = 8;
 const TIMED_CAPTURE_SUPPORT_THRESHOLD = 0.6;
 const INFERENCE_FRAME_BUFFER_MS = 20000;
+const MODEL_TEST_UNCERTAINTY_THRESHOLD = 0.7;
+const SAMPLED_TESTS_PER_LABEL = 3;
+const RECOMMENDED_TEST_SPLIT_RATIO = 0.15;
 
-type TestingMode = 'live' | 'model-testing' | 'arena';
+type TestingMode = 'inference' | 'model-testing' | 'arena';
 
 interface ChallengeStats {
   attempts: number;
@@ -172,9 +176,9 @@ export function TestPage({
   onOpenPortfolio,
   onRecordTestData,
 }: TestPageProps) {
-  const [mode, setMode] = useState<TestingMode>('live');
+  const [mode, setMode] = useState<TestingMode>('inference');
 
-  // Live Challenge state
+  // Live Inference state
   const [isRunning, setIsRunning] = useState(false);
   const [currentPrediction, setCurrentPrediction] = useState<number | null>(null);
   const [confidence, setConfidence] = useState(0);
@@ -188,6 +192,9 @@ export function TestPage({
   const [challengeStats, setChallengeStats] = useState<Record<string, ChallengeStats>>(
     () => createInitialChallengeStats(labels),
   );
+  const [expectedGestureIndex, setExpectedGestureIndex] = useState(0);
+  const [inferenceCorrectCount, setInferenceCorrectCount] = useState(0);
+  const [inferenceIncorrectCount, setInferenceIncorrectCount] = useState(0);
 
   // Model Testing state
   const [isApplyingSplit, setIsApplyingSplit] = useState(false);
@@ -195,6 +202,7 @@ export function TestPage({
   const [testingError, setTestingError] = useState<string | null>(null);
   const [testingInfo, setTestingInfo] = useState<string | null>(null);
   const [report, setReport] = useState<ModelTestingReport | null>(null);
+  const [reportScope, setReportScope] = useState<'full' | 'sampled'>('full');
 
   // Arena state
   const [isRunningArena, setIsRunningArena] = useState(false);
@@ -246,7 +254,7 @@ export function TestPage({
     if (!session) {
       return {
         canEvaluate: false,
-        message: 'Session not ready. Reconnect and retrain before model testing.',
+        message: 'Session not ready yet. Reconnect, then train your model before testing.',
       };
     }
 
@@ -254,7 +262,7 @@ export function TestPage({
       return {
         canEvaluate: false,
         message:
-          'No locked test set for this model version. Collect held-out test samples, then retrain.',
+          'No saved test set for this model yet. Collect test samples, then click Retrain.',
       };
     }
 
@@ -262,7 +270,7 @@ export function TestPage({
       return {
         canEvaluate: false,
         message:
-          'Data changed after training. Retrain now so Model Testing and Arena use the latest model/data pair.',
+          'You changed your samples after training. Click Retrain so Testing and Arena use your latest model.',
       };
     }
 
@@ -270,7 +278,7 @@ export function TestPage({
       return {
         canEvaluate: false,
         message:
-          'Locked test samples are missing from this session. Retrain to rebuild a valid locked test set.',
+          'Some saved test samples are missing. Click Retrain to rebuild your test set.',
       };
     }
 
@@ -278,13 +286,13 @@ export function TestPage({
       return {
         canEvaluate: false,
         message:
-          'Locked test set is empty. Collect test samples and retrain before running objective testing.',
+          'Your saved test set is empty. Collect test samples, then click Retrain.',
       };
     }
 
     return {
       canEvaluate: true,
-      message: `Locked test set ready (${lockedTestingSnapshot.lockedSamples.length} samples).`,
+      message: `Test set ready (${lockedTestingSnapshot.lockedSamples.length} samples).`,
     };
   }, [lockedTestingSnapshot.lockedSamples.length, lockedTestingSnapshot.missingIds.length, session]);
   const objectiveTestingSamples = useMemo(
@@ -302,6 +310,15 @@ export function TestPage({
   const lockedTestingCountsByLabel = useMemo(
     () => buildCountsByLabel(lockedTestingSnapshot.lockedSamples, labels),
     [labels, lockedTestingSnapshot.lockedSamples],
+  );
+
+  const sampledObjectiveTestingSamples = useMemo(
+    () => createBalancedSampledTestSet(objectiveTestingSamples, labels, SAMPLED_TESTS_PER_LABEL),
+    [labels, objectiveTestingSamples],
+  );
+  const sampledTestingCountsByLabel = useMemo(
+    () => buildCountsByLabel(sampledObjectiveTestingSamples, labels),
+    [labels, sampledObjectiveTestingSamples],
   );
 
   const arenaBenchmarks = useMemo(
@@ -404,7 +421,7 @@ export function TestPage({
   }, [labels, sessionSamples]);
 
   useEffect(() => {
-    if (mode === 'live' || !isRunning) {
+    if (mode === 'inference' || !isRunning) {
       return;
     }
 
@@ -803,11 +820,11 @@ export function TestPage({
     setTestingInfo(null);
     setIsApplyingSplit(true);
     try {
-      const updated = createRecommendedTestSplit(sessionSamples, labels, 0.2);
+      const updated = createRecommendedTestSplit(sessionSamples, labels, RECOMMENDED_TEST_SPLIT_RATIO);
       await setSessionSamples(updated);
       const { testingSamples: nextTesting } = splitSamplesByDataset(updated);
       setTestingInfo(
-        `Created recommended split with ${nextTesting.length} held-out test samples. Retrain before trusting the score.`,
+        `Recommended split created: ${nextTesting.length} test samples saved. Next step: click Retrain, then run Model Testing.`,
       );
     } catch (err) {
       console.error('Failed to apply split:', err);
@@ -827,7 +844,7 @@ export function TestPage({
       return;
     }
     if (objectiveTestingSamples.length === 0) {
-      setTestingError('Locked test set is empty. Collect test samples and retrain.');
+      setTestingError('Saved test set is empty. Collect test samples, then click Retrain.');
       return;
     }
 
@@ -837,15 +854,53 @@ export function TestPage({
         objectiveTestingSamples,
         labels,
         (sampleData) => trainingService.predict(sampleData),
+        { uncertaintyThreshold: MODEL_TEST_UNCERTAINTY_THRESHOLD },
       );
       setReport(nextReport);
+      setReportScope('full');
       setTestingInfo(
-        `Classified ${nextReport.totalSamples} locked test samples. Accuracy: ${formatPercent(nextReport.accuracy)}.`,
+        `Classified ${nextReport.totalSamples} locked test samples. Accuracy: ${formatPercent(nextReport.accuracy)}. Uncertain: ${formatPercent(nextReport.uncertainRate)} below ${(MODEL_TEST_UNCERTAINTY_THRESHOLD * 100).toFixed(0)}% confidence.`,
       );
     } catch (err) {
       console.error('Model testing failed:', err);
       setTestingError(
         err instanceof Error ? err.message : 'Failed to classify test samples.',
+      );
+      setReport(null);
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
+  const evaluateSampledTestSet = () => {
+    setTestingError(null);
+    setTestingInfo(null);
+    if (!testingLock.canEvaluate) {
+      setTestingError(testingLock.message);
+      return;
+    }
+    if (sampledObjectiveTestingSamples.length === 0) {
+      setTestingError('Sampled test set is empty. Collect more test samples, then click Retrain.');
+      return;
+    }
+
+    setIsEvaluating(true);
+    try {
+      const nextReport = evaluateModelOnSamples(
+        sampledObjectiveTestingSamples,
+        labels,
+        (sampleData) => trainingService.predict(sampleData),
+        { uncertaintyThreshold: MODEL_TEST_UNCERTAINTY_THRESHOLD },
+      );
+      setReport(nextReport);
+      setReportScope('sampled');
+      setTestingInfo(
+        `Sampled run complete: ${nextReport.totalSamples} samples (${SAMPLED_TESTS_PER_LABEL}/label max). Accuracy: ${formatPercent(nextReport.accuracy)}.`,
+      );
+    } catch (err) {
+      console.error('Sampled model testing failed:', err);
+      setTestingError(
+        err instanceof Error ? err.message : 'Failed to classify sampled test samples.',
       );
       setReport(null);
     } finally {
@@ -1028,7 +1083,7 @@ export function TestPage({
           <div className="card bg-gradient-to-br from-white to-slate-50">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h1 className="heading-md mb-2">🧪 Live Challenge</h1>
+                <h1 className="heading-md mb-2">🧪 Live Inference</h1>
                 <p className="text-slate-600">
                   {useArduinoInference
                     ? 'AI runs on Arduino. Perform gestures and score challenge attempts.'
@@ -1291,6 +1346,135 @@ export function TestPage({
     );
   };
 
+
+  const recordInferenceAttempt = () => {
+    const expected = labels[expectedGestureIndex];
+    if (!expected || currentPrediction === null) {
+      setChallengeNote('Start inference and perform a gesture before recording an attempt.');
+      return;
+    }
+
+    const predictedMatches = currentPrediction >= 0
+      && currentPrediction < labels.length
+      && labels[currentPrediction].id === expected.id;
+    const isCorrect = predictedMatches && confidence >= CHALLENGE_MIN_CONFIDENCE;
+
+    if (isCorrect) {
+      setInferenceCorrectCount((count) => count + 1);
+      setChallengeNote(`Correct: expected ${expected.name} and model agreed at ${formatPercent(confidence, 0)} confidence.`);
+    } else {
+      setInferenceIncorrectCount((count) => count + 1);
+      setChallengeNote(
+        predictedMatches
+          ? `Low confidence for ${expected.name} (${formatPercent(confidence, 0)}).`
+          : `Mismatch: expected ${expected.name}, predicted ${livePredictionView.label ?? 'Unknown'}.`,
+      );
+    }
+  };
+
+  const resetInferenceScoreboard = () => {
+    setInferenceCorrectCount(0);
+    setInferenceIncorrectCount(0);
+    setChallengeNote(null);
+  };
+
+  const renderInference = () => {
+    const totalAttempts = inferenceCorrectCount + inferenceIncorrectCount;
+    const successRate = totalAttempts > 0 ? inferenceCorrectCount / totalAttempts : 0;
+
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <div className="card bg-gradient-to-br from-white to-slate-50">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h1 className="heading-md mb-2">🔎 Live Inference</h1>
+                <p className="text-slate-600">
+                  Run your model live and record whether predictions matched the gesture you intended.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <button
+                onClick={() => {
+                  void startTesting();
+                }}
+                disabled={isRunning}
+                className="btn-primary disabled:opacity-50"
+              >
+                {isRunning ? 'Running…' : 'Start Inference'}
+              </button>
+              <button
+                onClick={() => {
+                  void stopTesting();
+                }}
+                disabled={!isRunning}
+                className="btn-secondary disabled:opacity-50"
+              >
+                Stop Inference
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Current prediction</div>
+              <div className="text-2xl font-bold text-slate-800">{livePredictionView.label ?? '—'}</div>
+              <div className="text-sm text-slate-600">Confidence: {formatPercent(confidence)}</div>
+            </div>
+
+            {liveError && (
+              <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                {liveError}
+              </div>
+            )}
+            {challengeNote && (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                {challengeNote}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="card">
+            <h3 className="font-bold text-slate-800 mb-3">Inference Scoreboard</h3>
+            <label className="text-sm text-slate-600">Expected gesture</label>
+            <select
+              value={expectedGestureIndex}
+              onChange={(event) => setExpectedGestureIndex(Number(event.target.value))}
+              className="mt-1 mb-3 w-full rounded-lg border border-slate-300 px-3 py-2"
+            >
+              {labels.map((label, idx) => (
+                <option key={label.id} value={idx}>{label.name}</option>
+              ))}
+            </select>
+
+            <button onClick={recordInferenceAttempt} className="btn-primary w-full mb-2">
+              Record Attempt
+            </button>
+            <button onClick={resetInferenceScoreboard} className="btn-secondary w-full">
+              Reset Counts
+            </button>
+
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                <div className="text-xs uppercase text-emerald-700">Correct</div>
+                <div className="text-2xl font-bold text-emerald-800">{inferenceCorrectCount}</div>
+              </div>
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+                <div className="text-xs uppercase text-rose-700">Incorrect</div>
+                <div className="text-2xl font-bold text-rose-800">{inferenceIncorrectCount}</div>
+              </div>
+            </div>
+            <div className="mt-3 text-sm text-slate-600">
+              Success rate: <span className="font-semibold text-slate-800">{formatPercent(successRate)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderModelTesting = () => {
     return (
       <div className="space-y-6">
@@ -1338,6 +1522,7 @@ export function TestPage({
                   <th className="py-2 pr-4">Train</th>
                   <th className="py-2 pr-4">Current Test</th>
                   <th className="py-2 pr-4">Locked Test</th>
+                  <th className="py-2 pr-4">Sampled Test</th>
                 </tr>
               </thead>
               <tbody>
@@ -1347,6 +1532,7 @@ export function TestPage({
                     <td className="py-2 pr-4">{trainingCountsByLabel.get(label.id) ?? 0}</td>
                     <td className="py-2 pr-4">{testingCountsByLabel.get(label.id) ?? 0}</td>
                     <td className="py-2 pr-4">{lockedTestingCountsByLabel.get(label.id) ?? 0}</td>
+                    <td className="py-2 pr-4 font-semibold text-indigo-700">{sampledTestingCountsByLabel.get(label.id) ?? 0}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1367,7 +1553,7 @@ export function TestPage({
               disabled={isApplyingSplit}
               className="btn-secondary bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-300"
             >
-              {isApplyingSplit ? 'Applying...' : 'Create Recommended Test Split (20%)'}
+              {isApplyingSplit ? 'Applying...' : `Create Recommended Test Split (${Math.round(RECOMMENDED_TEST_SPLIT_RATIO * 100)}%)`}
             </button>
             <button
               onClick={evaluateAllTestSamples}
@@ -1376,10 +1562,17 @@ export function TestPage({
             >
               {isEvaluating ? 'Classifying...' : 'Classify Locked Test Set'}
             </button>
+            <button
+              onClick={evaluateSampledTestSet}
+              disabled={isEvaluating || !testingLock.canEvaluate}
+              className="btn-secondary bg-indigo-100 hover:bg-indigo-200 text-indigo-900 border-indigo-300 disabled:opacity-50"
+            >
+              {isEvaluating ? 'Classifying...' : `Run Sampled Test (${SAMPLED_TESTS_PER_LABEL}/label)`}
+            </button>
           </div>
 
           <p className="mt-3 text-xs text-slate-500">
-            Any data change invalidates locked results. Retrain to refresh the locked test set.
+            Tip: if you collect or move samples, click Retrain before running Model Testing again.
           </p>
 
           <div
@@ -1406,7 +1599,17 @@ export function TestPage({
 
         {report && (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className={`rounded-xl border p-3 text-sm ${
+              reportScope === 'sampled'
+                ? 'border-indigo-200 bg-indigo-50 text-indigo-900'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+            }`}>
+              {reportScope === 'sampled'
+                ? `Showing sampled evaluation (${SAMPLED_TESTS_PER_LABEL}/label max). Use full locked test for final readiness.`
+                : 'Showing full locked test evaluation.'}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                 <div className="text-xs uppercase tracking-wide text-emerald-700">Accuracy</div>
                 <div className="text-3xl font-bold text-emerald-800">
@@ -1429,6 +1632,16 @@ export function TestPage({
                 <div className="text-xs uppercase tracking-wide text-amber-700">Mean confidence</div>
                 <div className="text-3xl font-bold text-amber-800">
                   {formatPercent(report.meanConfidence)}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+                <div className="text-xs uppercase tracking-wide text-orange-700">Uncertain samples</div>
+                <div className="text-3xl font-bold text-orange-800">
+                  {report.uncertainSamples}/{report.totalSamples}
+                </div>
+                <div className="mt-1 text-xs text-orange-700">
+                  Below {(report.uncertaintyThreshold * 100).toFixed(0)}% confidence
                 </div>
               </div>
             </div>
@@ -1516,6 +1729,10 @@ export function TestPage({
                 </button>
               </div>
 
+              <p className="mb-3 text-xs text-slate-500">
+                Confidence-state tags help separate low-certainty outputs from true model errors.
+              </p>
+
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
@@ -1524,6 +1741,7 @@ export function TestPage({
                       <th className="py-2 pr-4">Expected</th>
                       <th className="py-2 pr-4">Predicted</th>
                       <th className="py-2 pr-4">Confidence</th>
+                      <th className="py-2 pr-4">Confidence State</th>
                       <th className="py-2 pr-4">Result</th>
                       <th className="py-2 pr-4">Action</th>
                     </tr>
@@ -1535,6 +1753,17 @@ export function TestPage({
                         <td className="py-2 pr-4 text-slate-700">{result.expectedLabelName}</td>
                         <td className="py-2 pr-4 text-slate-700">{result.predictedLabelName}</td>
                         <td className="py-2 pr-4 text-slate-600">{formatPercent(result.confidence)}</td>
+                        <td className="py-2 pr-4">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
+                              result.isUncertain
+                                ? 'bg-orange-100 text-orange-700'
+                                : 'bg-emerald-100 text-emerald-700'
+                            }`}
+                          >
+                            {result.isUncertain ? 'Uncertain' : 'Confident'}
+                          </span>
+                        </td>
                         <td className="py-2 pr-4">
                           <span
                             className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ${
@@ -1611,6 +1840,7 @@ export function TestPage({
                   <th className="py-2 pr-4">Gesture</th>
                   <th className="py-2 pr-4">Train</th>
                   <th className="py-2 pr-4">Locked Test</th>
+                  <th className="py-2 pr-4">Sampled Test</th>
                   <th className="py-2 pr-4">Generic Benchmarks</th>
                 </tr>
               </thead>
@@ -1624,6 +1854,7 @@ export function TestPage({
                       <td className="py-2 pr-4 font-medium">{label.name}</td>
                       <td className="py-2 pr-4">{trainingCountsByLabel.get(label.id) ?? 0}</td>
                       <td className="py-2 pr-4">{lockedTestingCountsByLabel.get(label.id) ?? 0}</td>
+                    <td className="py-2 pr-4 font-semibold text-indigo-700">{sampledTestingCountsByLabel.get(label.id) ?? 0}</td>
                       <td className="py-2 pr-4">{genericCount}</td>
                     </tr>
                   );
@@ -1857,14 +2088,14 @@ export function TestPage({
       <div className="card bg-white border border-slate-200">
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setMode('live')}
+            onClick={() => setMode('inference')}
             className={`px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
-              mode === 'live'
+              mode === 'inference'
                 ? 'bg-primary-600 text-white'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
-            Live Challenge
+            Live Inference
           </button>
           <button
             onClick={() => setMode('model-testing')}
@@ -1889,7 +2120,7 @@ export function TestPage({
         </div>
       </div>
 
-      {mode === 'live' && renderLiveChallenge()}
+      {mode === 'inference' && renderInference()}
       {mode === 'model-testing' && renderModelTesting()}
       {mode === 'arena' && renderArena()}
     </div>
