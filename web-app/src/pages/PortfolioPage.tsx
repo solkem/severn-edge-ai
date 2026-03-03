@@ -37,12 +37,6 @@ export function PortfolioPage({ onBackToTest, onStartOver }: PortfolioPageProps)
           <p>
             <strong>Total Samples:</strong> {samples.length}
           </p>
-          <p>
-            <strong>Training Accuracy:</strong>{' '}
-            {session.trainingAccuracy !== null
-              ? `${Math.round(session.trainingAccuracy * 100)}%`
-              : 'Not recorded'}
-          </p>
         </div>
       </div>
 
@@ -68,4 +62,3 @@ export function PortfolioPage({ onBackToTest, onStartOver }: PortfolioPageProps)
     </div>
   );
 }
-

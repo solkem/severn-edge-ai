@@ -1,15 +1,13 @@
-import { useState } from 'react';
 import { useSessionStore } from '../state/sessionStore';
 import { downloadPortfolio } from '../services/portfolioExportService';
 
 export function ShareSection() {
   const { session, samples, journal } = useSessionStore();
-  const [anonymized, setAnonymized] = useState(false);
 
   if (!session) return null;
 
   const download = () => {
-    downloadPortfolio(session, samples, journal, anonymized);
+    downloadPortfolio(session, samples, journal, false);
   };
 
   return (
@@ -18,15 +16,6 @@ export function ShareSection() {
       <p className="text-sm text-slate-600 mb-4">
         Download a self-contained portfolio file and share it with family.
       </p>
-
-      <label className="flex items-center gap-2 text-sm text-slate-700 mb-3">
-        <input
-          type="checkbox"
-          checked={anonymized}
-          onChange={(e) => setAnonymized(e.target.checked)}
-        />
-        Anonymize student name in export
-      </label>
 
       <div className="flex flex-wrap gap-2">
         <button onClick={download} className="btn-primary">
