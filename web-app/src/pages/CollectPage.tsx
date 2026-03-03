@@ -129,6 +129,7 @@ interface CollectPageProps {
   initialSamples?: Sample[];
   targetSplit?: 'train' | 'test';
   appendMode?: boolean;
+  startInSetupPhase?: boolean;
   requiredSamplesPerGesture?: number;
   onCancel?: () => void;
 }
@@ -183,6 +184,7 @@ export function CollectPage({
   initialSamples,
   targetSplit = 'train',
   appendMode = false,
+  startInSetupPhase = false,
   requiredSamplesPerGesture,
   onCancel,
 }: CollectPageProps) {
@@ -225,7 +227,7 @@ export function CollectPage({
 
   // Gesture setup phase
   const [isSetupComplete, setIsSetupComplete] = useState(
-    appendMode && !!initialLabels?.length,
+    appendMode && !!initialLabels?.length && !startInSetupPhase,
   );
   const [newGestureName, setNewGestureName] = useState('');
   const userGestureCount = labels.filter((label) => !isIdleLabel(label)).length;

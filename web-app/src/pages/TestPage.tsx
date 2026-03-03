@@ -102,6 +102,7 @@ interface TestPageProps {
   labels: GestureLabel[];
   trainingService: TrainingService;
   onStartOver?: () => void;
+  onCollectMoreData?: () => void;
   onOpenPortfolio?: () => void;
 }
 
@@ -109,6 +110,7 @@ export function TestPage({
   labels,
   trainingService,
   onStartOver,
+  onCollectMoreData,
   onOpenPortfolio,
 }: TestPageProps) {
   // Live inference state
@@ -856,13 +858,21 @@ export function TestPage({
                   Open Portfolio
                 </button>
               )}
+              {onCollectMoreData && (
+                <button
+                  onClick={onCollectMoreData}
+                  className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold py-3 px-6 rounded-xl transition-colors border border-indigo-200"
+                >
+                  Add Data / Edit Gestures
+                </button>
+              )}
               {onStartOver && (
                 <button
                   onClick={onStartOver}
                   className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 px-6 rounded-xl transition-colors border border-slate-200 flex items-center justify-center gap-2"
                 >
                   <span>🏠</span>
-                  <span>Start Over</span>
+                  <span>Start New Gestures</span>
                 </button>
               )}
             </div>

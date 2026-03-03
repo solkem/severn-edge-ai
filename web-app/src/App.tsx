@@ -15,6 +15,7 @@ import type { DeviceInfo } from './types/ble';
 import type { Sample, GestureLabel, AppStage as AppStageType } from './types';
 import { AppStage } from './types';
 import { TrainingService } from './services/trainingService';
+import { getBLEService } from './services/bleService';
 import { useSessionStore } from './state/sessionStore';
 import { useConnectionStore } from './state/connectionStore';
 import { ConnectionStatusPill } from './components/ConnectionStatusPill';
@@ -50,7 +51,7 @@ function App() {
   const [trainingService, setTrainingService] = useState<TrainingService | null>(null);
   const [activeCheck, setActiveCheck] = useState<KnowledgeCheck | null>(null);
   const [pendingStage, setPendingStage] = useState<AppStageType | null>(null);
-  const [collectMode, setCollectMode] = useState<'default' | 'append-train'>('default');
+  const [collectMode, setCollectMode] = useState<'default' | 'append-train' | 'edit-existing'>('default');
 
 
   const initializeSession = useSessionStore((state) => state.initialize);
@@ -180,6 +181,12 @@ function App() {
     goToStage(AppStage.COLLECT);
   };
 
+  const handleEditExistingDataAndGestures = () => {
+    setTrainingService(null);
+    setCollectMode('edit-existing');
+    goToStage(AppStage.COLLECT);
+  };
+
   const handleCancelAppendCollect = () => {
     setCollectMode('default');
     goToStage(AppStage.TRAIN);
@@ -187,14 +194,27 @@ function App() {
 
 
   const handleStartOver = () => {
-    setSessionStage(AppStage.CONNECT);
-    void startFresh();
-    setDeviceInfo(null);
+    const ble = getBLEService();
+    const stillConnected = ble.isConnected();
     setTrainingService(null);
     setActiveCheck(null);
     setPendingStage(null);
     setCollectMode('default');
-    clearResumeStage();
+    void (async () => {
+      await startFresh();
+
+      if (stillConnected) {
+        if (deviceInfo) {
+          setSessionDeviceName(`${deviceInfo.firmwareMajor}.${deviceInfo.firmwareMinor}`);
+        }
+        setSessionStage(AppStage.COLLECT);
+        return;
+      }
+
+      setDeviceInfo(null);
+      setSessionStage(AppStage.CONNECT);
+      clearResumeStage();
+    })();
   };
 
   const stageOrder = useMemo(
@@ -307,6 +327,17 @@ function App() {
               requiredSamplesPerGesture={3}
               onCancel={handleCancelAppendCollect}
             />
+          ) : collectMode === 'edit-existing' ? (
+            <CollectPage
+              onComplete={handleAppendCollectComplete}
+              initialLabels={labels}
+              initialSamples={samples}
+              targetSplit="train"
+              appendMode
+              startInSetupPhase
+              requiredSamplesPerGesture={3}
+              onCancel={() => goToStage(AppStage.TEST)}
+            />
           ) : (
             <CollectPage
               onComplete={handleCollectComplete}
@@ -328,6 +359,7 @@ function App() {
             labels={labels}
             trainingService={trainingService}
             onStartOver={handleStartOver}
+            onCollectMoreData={handleEditExistingDataAndGestures}
             onOpenPortfolio={handleOpenPortfolio}
           />
         )}

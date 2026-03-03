@@ -385,9 +385,6 @@ export function TrainPage({
                 <h3 className="text-xl font-bold text-emerald-900 mb-2">
                   Training Finished
                 </h3>
-                <div className="text-7xl font-bold text-emerald-600 mb-2 tracking-tighter">
-                  {formatAccuracy(accuracy)}<span className="text-4xl">%</span>
-                </div>
               </div>
 
               <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 text-left">
