@@ -2,12 +2,19 @@
  * Collect Page - Record Labeled Gesture Samples
  */
 
-import { useState, useRef } from 'react';
+import { useRef, useState } from 'react';
 import { getBLEService } from '../services/bleService';
 import { SensorPacket } from '../types/ble';
 import { KidFeedback, FeedbackStatus } from '../components/KidFeedback';
 import { GestureLabel, Sample } from '../types';
 import { COLLECTION_CONFIG } from '../config/constants';
+
+const IDLE_LABEL_ID = '__idle__';
+const IDLE_LABEL_NAME = 'Idle';
+
+function isIdleLabel(label: Pick<GestureLabel, 'id' | 'name'>): boolean {
+  return label.id === IDLE_LABEL_ID || label.name.trim().toLowerCase() === 'idle';
+}
 
 /** Editable gesture pill for the setup phase */
 function GesturePill({ label, canRemove, onRemove, onRename, maxLength }: {
@@ -188,7 +195,22 @@ export function CollectPage({
           name,
           sampleCount: 0,
         }));
-    return withSampleCounts(seedLabels, seededSamples, targetSplit);
+    const seededLabels = withSampleCounts(seedLabels, seededSamples, targetSplit);
+    const hasIdle = seededLabels.some((label) => isIdleLabel(label));
+    const nonIdleCount = seededLabels.filter((label) => !isIdleLabel(label)).length;
+
+    if (hasIdle || nonIdleCount !== 1) {
+      return seededLabels;
+    }
+
+    return [
+      ...seededLabels,
+      {
+        id: IDLE_LABEL_ID,
+        name: IDLE_LABEL_NAME,
+        sampleCount: countSamplesForLabel(seededSamples, IDLE_LABEL_ID, targetSplit),
+      },
+    ];
   });
 
   const [samples, setSamples] = useState<Sample[]>(() =>
@@ -206,6 +228,7 @@ export function CollectPage({
     appendMode && !!initialLabels?.length,
   );
   const [newGestureName, setNewGestureName] = useState('');
+  const userGestureCount = labels.filter((label) => !isIdleLabel(label)).length;
 
   // Live sensor display
   const [livePacket, setLivePacket] = useState<number[] | null>(null);
@@ -351,6 +374,27 @@ export function CollectPage({
     onComplete(samples, labels);
   };
 
+  const ensureIdleClassForSingleGesture = () => {
+    const hasIdle = labels.some((label) => isIdleLabel(label));
+    if (hasIdle || userGestureCount !== 1) {
+      return;
+    }
+
+    setLabels((prev) => {
+      if (prev.some((label) => isIdleLabel(label))) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          id: IDLE_LABEL_ID,
+          name: IDLE_LABEL_NAME,
+          sampleCount: countSamplesForLabel(samples, IDLE_LABEL_ID, targetSplit),
+        },
+      ];
+    });
+  };
+
   // --- Gesture Setup Handlers ---
   const addGesture = () => {
     const trimmed = newGestureName.trim();
@@ -367,19 +411,35 @@ export function CollectPage({
   };
 
   const removeGesture = (labelId: string) => {
-    if (labels.length <= COLLECTION_CONFIG.MIN_GESTURES) return;
-    setLabels((prev) => prev.filter((l) => l.id !== labelId));
+    setLabels((prev) => {
+      const target = prev.find((label) => label.id === labelId);
+      if (!target || isIdleLabel(target)) {
+        return prev;
+      }
+
+      const nonIdleCount = prev.filter((label) => !isIdleLabel(label)).length;
+      if (nonIdleCount <= COLLECTION_CONFIG.MIN_GESTURES) {
+        return prev;
+      }
+
+      return prev.filter((label) => label.id !== labelId);
+    });
   };
 
   const renameGesture = (labelId: string, newName: string) => {
     const trimmed = newName.trim();
     if (!trimmed || trimmed.length > COLLECTION_CONFIG.MAX_GESTURE_NAME_LENGTH) return;
     if (labels.some((l) => l.id !== labelId && l.name.toLowerCase() === trimmed.toLowerCase())) return;
-    setLabels((prev) => prev.map((l) => (l.id === labelId ? { ...l, name: trimmed } : l)));
+    setLabels((prev) => prev.map((label) => {
+      if (label.id !== labelId || isIdleLabel(label)) {
+        return label;
+      }
+      return { ...label, name: trimmed };
+    }));
   };
 
   const canAddMore = labels.length < COLLECTION_CONFIG.MAX_GESTURES;
-  const canStartRecording = labels.length >= COLLECTION_CONFIG.MIN_GESTURES;
+  const canStartRecording = userGestureCount >= COLLECTION_CONFIG.MIN_GESTURES;
   const isDuplicateName = newGestureName.trim() &&
     labels.some((l) => l.name.toLowerCase() === newGestureName.trim().toLowerCase());
 
@@ -407,9 +467,12 @@ export function CollectPage({
                 <GesturePill
                   key={label.id}
                   label={label}
-                  canRemove={labels.length > COLLECTION_CONFIG.MIN_GESTURES}
+                  canRemove={!isIdleLabel(label) && userGestureCount > COLLECTION_CONFIG.MIN_GESTURES}
                   onRemove={() => removeGesture(label.id)}
-                  onRename={(name) => renameGesture(label.id, name)}
+                  onRename={(name) => {
+                    if (isIdleLabel(label)) return;
+                    renameGesture(label.id, name);
+                  }}
                   maxLength={COLLECTION_CONFIG.MAX_GESTURE_NAME_LENGTH}
                 />
               ))}
@@ -449,8 +512,11 @@ export function CollectPage({
           </div>
 
           {/* Start Recording button */}
-          <button
-            onClick={() => setIsSetupComplete(true)}
+              <button
+            onClick={() => {
+              ensureIdleClassForSingleGesture();
+              setIsSetupComplete(true);
+            }}
             disabled={!canStartRecording}
             className="btn-success text-xl w-full py-4 shadow-xl shadow-emerald-200 disabled:opacity-30 disabled:cursor-not-allowed"
           >
@@ -543,6 +609,7 @@ export function CollectPage({
                 const hasReachedGoal = label.sampleCount >= samplesPerGestureGoal;
                 const labelComplete = !appendMode && hasReachedGoal;
                 const progress = (Math.min(label.sampleCount, samplesPerGestureGoal) / samplesPerGestureGoal) * 100;
+                const idleClass = isIdleLabel(label);
 
                 return (
                   <div
@@ -584,6 +651,8 @@ export function CollectPage({
                     >
                       {labelComplete
                         ? 'Completed'
+                        : idleClass
+                        ? 'Record Idle Sample'
                         : targetSplit === 'test'
                         ? 'Record Test Sample'
                         : 'Record Sample'}

@@ -37,6 +37,14 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
   const [hasModel, setHasModel] = useState(false);
   const [trainingCount, setTrainingCount] = useState(0);
   const { setTrainingAccuracy, addBadge, recordTrainingSnapshot } = useSessionStore();
+  const nonIdleGestureCount = useMemo(
+    () => labels.filter((label) => label.name.trim().toLowerCase() !== 'idle').length,
+    [labels],
+  );
+  const hasIdleClass = useMemo(
+    () => labels.some((label) => label.name.trim().toLowerCase() === 'idle'),
+    [labels],
+  );
 
   const trainingSamples = useMemo(
     () => samples.filter((sample) => sample.split !== 'test'),
@@ -375,7 +383,10 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
             <KidFeedback status="success" message="Your robot learned new tricks!" />
 
             <div className="mt-8 space-y-6 max-w-lg mx-auto">
-              <IdleClassBanner gestureCount={labels.length} />
+              <IdleClassBanner
+                nonIdleGestureCount={nonIdleGestureCount}
+                hasIdleClass={hasIdleClass}
+              />
 
               <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-8 relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-full h-2 bg-emerald-400"></div>

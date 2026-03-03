@@ -1,9 +1,9 @@
 /**
- * Test Page — Simple Live Testing with Correct/Incorrect Scoring
+ * Test Page — Guided Inference Check
  *
- * Students start live inference, perform gestures, and tap ✅ or ❌
- * to record whether the AI recognized them correctly. Each gesture
- * shows a running tally of correct / total attempts.
+ * Students run a guided sequence where each gesture is prompted for 30 seconds.
+ * The app scores one result every 4 seconds and summarizes per-target and overall
+ * success/failure. In single-gesture mode, an additional Idle target is scored.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -16,15 +16,20 @@ import {
   applyMotionHeuristic,
   normalizeConfidence,
 } from '../services/inferenceUtils';
+import {
+  buildGuidedTestTargets,
+  evaluateGuidedInterval,
+  summarizeGuidedIntervals,
+  type GuidedIntervalResult,
+  type InferenceFrame,
+} from '../services/guidedGestureTestingService';
 
-// Session auto-ends after 2 minutes to prevent stuck streams.
-const LIVE_SESSION_MAX_MS = 2 * 60 * 1000;
 const LIVE_IDLE_CONFIDENCE_THRESHOLD = 0.55;
-
-interface GestureScore {
-  correct: number;
-  total: number;
-}
+const GUIDED_PROMPT_MS = 30 * 1000;
+const GUIDED_INTERVAL_MS = 4 * 1000;
+const GUIDED_INTERVALS_PER_TARGET = Math.floor(GUIDED_PROMPT_MS / GUIDED_INTERVAL_MS);
+const GUIDED_INTERVAL_MIN_FRAMES = 8;
+const INFERENCE_FRAME_BUFFER_MS = 20000;
 
 function formatPercent(value: number, digits = 0): string {
   return `${(value * 100).toFixed(digits)}%`;
@@ -54,67 +59,87 @@ export function TestPage({
   const [isRunning, setIsRunning] = useState(false);
   const [currentPrediction, setCurrentPrediction] = useState<number | null>(null);
   const [confidence, setConfidence] = useState(0);
-  const [sessionMsRemaining, setSessionMsRemaining] = useState(LIVE_SESSION_MAX_MS);
-  const [useArduinoInference, setUseArduinoInference] = useState(true);
+  const [useArduinoInference, setUseArduinoInference] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
+  const [challengeNote, setChallengeNote] = useState<string | null>(null);
 
-  // Scoring state — per-gesture correct / total
-  const [scores, setScores] = useState<Record<string, GestureScore>>(() =>
-    Object.fromEntries(labels.map((l) => [l.id, { correct: 0, total: 0 }])),
+  // Guided testing state
+  const guidedTargets = useMemo(() => buildGuidedTestTargets(labels), [labels]);
+  const hasVirtualIdleTarget = useMemo(
+    () => guidedTargets.some((target) => target.kind === 'idle' && target.labelIndex === null),
+    [guidedTargets],
   );
-  // Which gesture the student is currently testing
-  const [activeGestureId, setActiveGestureId] = useState<string | null>(
-    labels.length > 0 ? labels[0].id : null,
-  );
+  const [guidedPhase, setGuidedPhase] = useState<'idle' | 'running' | 'complete'>('idle');
+  const [guidedIntervals, setGuidedIntervals] = useState<GuidedIntervalResult[]>([]);
+  const [activeTargetIndex, setActiveTargetIndex] = useState(0);
+  const [sessionMsRemaining, setSessionMsRemaining] = useState(guidedTargets.length * GUIDED_PROMPT_MS);
+  const [targetMsRemaining, setTargetMsRemaining] = useState(GUIDED_PROMPT_MS);
 
-  const liveSessionStopTimerRef = useRef<number | null>(null);
-  const liveSessionStartedAtRef = useRef<number | null>(null);
+  // Refs for sequence timing + interval scoring
+  const guidedRunIdRef = useRef(0);
+  const guidedTimerRef = useRef<number | null>(null);
+  const guidedTargetStartedAtRef = useRef<number | null>(null);
+  const guidedCompletedIntervalsRef = useRef(0);
+  const guidedActiveTargetIndexRef = useRef(0);
+  const inferenceFramesRef = useRef<InferenceFrame[]>([]);
+  const guidedWaitingForFirstPredictionRef = useRef(false);
+
+  const clearGuidedTimer = useCallback(() => {
+    if (guidedTimerRef.current !== null) {
+      window.clearInterval(guidedTimerRef.current);
+      guidedTimerRef.current = null;
+    }
+  }, []);
+
+  const resetGuidedRuntime = useCallback((clearResults = false) => {
+    clearGuidedTimer();
+    guidedRunIdRef.current += 1;
+    guidedTargetStartedAtRef.current = null;
+    guidedCompletedIntervalsRef.current = 0;
+    guidedActiveTargetIndexRef.current = 0;
+    guidedWaitingForFirstPredictionRef.current = false;
+    setGuidedPhase('idle');
+    setActiveTargetIndex(0);
+    setTargetMsRemaining(GUIDED_PROMPT_MS);
+    setSessionMsRemaining(guidedTargets.length * GUIDED_PROMPT_MS);
+    if (clearResults) {
+      setGuidedIntervals([]);
+    }
+  }, [clearGuidedTimer, guidedTargets.length]);
+
+  const appendInferenceFrame = useCallback((prediction: number, confidenceValue: number) => {
+    const frame: InferenceFrame = {
+      timestamp: Date.now(),
+      prediction,
+      confidence: Math.max(0, Math.min(1, confidenceValue)),
+    };
+    const frames = inferenceFramesRef.current;
+    frames.push(frame);
+    while (
+      frames.length > 0
+      && frame.timestamp - frames[0].timestamp > INFERENCE_FRAME_BUFFER_MS
+    ) {
+      frames.shift();
+    }
+  }, []);
 
   // ---------- Cleanup ----------
   useEffect(() => {
     return () => {
-      if (liveSessionStopTimerRef.current !== null) {
-        window.clearTimeout(liveSessionStopTimerRef.current);
-      }
+      clearGuidedTimer();
       const ble = getBLEService();
       void Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
     };
-  }, []);
+  }, [clearGuidedTimer]);
 
-  // Keep gesture scores in sync with labels
+  // Keep guided state in sync with labels
   useEffect(() => {
-    setScores((prev) => {
-      const next: Record<string, GestureScore> = {};
-      for (const label of labels) {
-        next[label.id] = prev[label.id] ?? { correct: 0, total: 0 };
-      }
-      return next;
-    });
-    if (activeGestureId && !labels.find((l) => l.id === activeGestureId)) {
-      setActiveGestureId(labels.length > 0 ? labels[0].id : null);
-    }
-  }, [labels, activeGestureId]);
+    setGuidedIntervals([]);
+    setChallengeNote(null);
+    resetGuidedRuntime(false);
+  }, [labels, resetGuidedRuntime]);
 
-  // ---------- Session timer display ----------
-  useEffect(() => {
-    if (!isRunning || liveSessionStartedAtRef.current === null) {
-      setSessionMsRemaining(LIVE_SESSION_MAX_MS);
-      return;
-    }
-
-    const tick = () => {
-      if (liveSessionStartedAtRef.current === null) return;
-      const elapsed = Date.now() - liveSessionStartedAtRef.current;
-      setSessionMsRemaining(Math.max(0, LIVE_SESSION_MAX_MS - elapsed));
-    };
-
-    tick();
-    const timer = window.setInterval(tick, 200);
-    return () => window.clearInterval(timer);
-  }, [isRunning]);
-
-  // ---------- Start / Stop ----------
-  const stopTestingInternal = useCallback(async () => {
+  const stopTestingInternal = useCallback(async (reason?: string, markComplete = false) => {
     const ble = getBLEService();
     try {
       await Promise.allSettled([ble.stopInference(), ble.stopSensorStream()]);
@@ -122,28 +147,146 @@ export function TestPage({
       console.error('Stop testing failed:', err);
     } finally {
       setIsRunning(false);
-      if (liveSessionStopTimerRef.current !== null) {
-        window.clearTimeout(liveSessionStopTimerRef.current);
-        liveSessionStopTimerRef.current = null;
+      clearGuidedTimer();
+      guidedTargetStartedAtRef.current = null;
+      guidedCompletedIntervalsRef.current = 0;
+      guidedWaitingForFirstPredictionRef.current = false;
+      if (markComplete) {
+        setGuidedPhase('complete');
+        setSessionMsRemaining(0);
+        setTargetMsRemaining(0);
+      } else {
+        setGuidedPhase('idle');
+        setTargetMsRemaining(GUIDED_PROMPT_MS);
+        setSessionMsRemaining(guidedTargets.length * GUIDED_PROMPT_MS);
       }
-      liveSessionStartedAtRef.current = null;
-      setSessionMsRemaining(LIVE_SESSION_MAX_MS);
+      if (reason) {
+        setChallengeNote(reason);
+      }
     }
-  }, []);
+  }, [clearGuidedTimer, guidedTargets.length]);
 
+  const startGuidedSequence = useCallback(() => {
+    if (guidedTargets.length === 0) {
+      setChallengeNote('Add at least one gesture before starting guided testing.');
+      return;
+    }
+
+    const runId = guidedRunIdRef.current + 1;
+    guidedRunIdRef.current = runId;
+    guidedTargetStartedAtRef.current = Date.now();
+    guidedCompletedIntervalsRef.current = 0;
+    guidedActiveTargetIndexRef.current = 0;
+    setActiveTargetIndex(0);
+    setGuidedPhase('running');
+    setGuidedIntervals([]);
+    setTargetMsRemaining(GUIDED_PROMPT_MS);
+    setSessionMsRemaining(guidedTargets.length * GUIDED_PROMPT_MS);
+
+    const firstTarget = guidedTargets[0];
+    setChallengeNote(
+      firstTarget.kind === 'idle'
+        ? 'Stay still for 30 seconds (Idle check).'
+        : `Perform "${firstTarget.name}" for 30 seconds.`,
+    );
+
+    clearGuidedTimer();
+    const totalRunMs = guidedTargets.length * GUIDED_PROMPT_MS;
+
+    const tick = () => {
+      if (guidedRunIdRef.current !== runId) return;
+
+      const targetIndex = guidedActiveTargetIndexRef.current;
+      const target = guidedTargets[targetIndex];
+      const targetStart = guidedTargetStartedAtRef.current;
+      if (!target || targetStart === null) return;
+
+      const now = Date.now();
+      const elapsedTargetMs = now - targetStart;
+      const elapsedOverallMs = targetIndex * GUIDED_PROMPT_MS + Math.min(
+        elapsedTargetMs,
+        GUIDED_PROMPT_MS,
+      );
+      setTargetMsRemaining(Math.max(0, GUIDED_PROMPT_MS - elapsedTargetMs));
+      setSessionMsRemaining(Math.max(0, totalRunMs - elapsedOverallMs));
+
+      while (guidedCompletedIntervalsRef.current < GUIDED_INTERVALS_PER_TARGET) {
+        const intervalNumber = guidedCompletedIntervalsRef.current + 1;
+        const intervalEnd = targetStart + intervalNumber * GUIDED_INTERVAL_MS;
+        if (now < intervalEnd) break;
+
+        const intervalStart = intervalEnd - GUIDED_INTERVAL_MS;
+        const intervalResult = evaluateGuidedInterval(
+          inferenceFramesRef.current,
+          labels,
+          target,
+          intervalNumber,
+          intervalStart,
+          intervalEnd,
+          {
+            minFrames: GUIDED_INTERVAL_MIN_FRAMES,
+            idleConfidenceThreshold: hasVirtualIdleTarget ? LIVE_IDLE_CONFIDENCE_THRESHOLD : 0,
+          },
+        );
+        setGuidedIntervals((prev) => [...prev, intervalResult]);
+        guidedCompletedIntervalsRef.current = intervalNumber;
+      }
+
+      if (elapsedTargetMs < GUIDED_PROMPT_MS) {
+        return;
+      }
+
+      const nextTargetIndex = targetIndex + 1;
+      if (nextTargetIndex >= guidedTargets.length) {
+        guidedRunIdRef.current += 1;
+        clearGuidedTimer();
+        guidedTargetStartedAtRef.current = null;
+        guidedCompletedIntervalsRef.current = 0;
+        void stopTestingInternal('Guided testing complete.', true);
+        return;
+      }
+
+      guidedActiveTargetIndexRef.current = nextTargetIndex;
+      setActiveTargetIndex(nextTargetIndex);
+      guidedCompletedIntervalsRef.current = 0;
+      guidedTargetStartedAtRef.current = now;
+      setTargetMsRemaining(GUIDED_PROMPT_MS);
+
+      const nextTarget = guidedTargets[nextTargetIndex];
+      setChallengeNote(
+        nextTarget.kind === 'idle'
+          ? 'Stay still for 30 seconds (Idle check).'
+          : `Perform "${nextTarget.name}" for 30 seconds.`,
+      );
+    };
+
+    tick();
+    guidedTimerRef.current = window.setInterval(tick, 100);
+  }, [clearGuidedTimer, guidedTargets, hasVirtualIdleTarget, labels, stopTestingInternal]);
+
+  const startGuidedSequenceOnFirstPrediction = useCallback(() => {
+    if (!guidedWaitingForFirstPredictionRef.current) return;
+    guidedWaitingForFirstPredictionRef.current = false;
+    startGuidedSequence();
+  }, [startGuidedSequence]);
+
+  // ---------- Start / Stop ----------
   const startTesting = async () => {
+    if (guidedTargets.length === 0) {
+      setLiveError('Add at least one gesture before testing.');
+      return;
+    }
+
     const ble = getBLEService();
     setLiveError(null);
+    setChallengeNote(null);
     setCurrentPrediction(null);
     setConfidence(0);
-    liveSessionStartedAtRef.current = Date.now();
-    setSessionMsRemaining(LIVE_SESSION_MAX_MS);
-
-    liveSessionStopTimerRef.current = window.setTimeout(() => {
-      void stopTestingInternal();
-    }, LIVE_SESSION_MAX_MS);
-
+    resetGuidedRuntime(true);
+    inferenceFramesRef.current = [];
+    guidedWaitingForFirstPredictionRef.current = true;
     setIsRunning(true);
+    setChallengeNote('Warming up model window... scoring starts on first prediction.');
 
     try {
       if (useArduinoInference) {
@@ -155,8 +298,11 @@ export function TestPage({
             return;
           }
           setLiveError(null);
+          const normalizedConfidence = normalizeConfidence(result.confidence, 'arduino');
           setCurrentPrediction(result.prediction);
-          setConfidence(normalizeConfidence(result.confidence, 'arduino'));
+          setConfidence(normalizedConfidence);
+          appendInferenceFrame(result.prediction, normalizedConfidence);
+          startGuidedSequenceOnFirstPrediction();
         });
       } else {
         const { MODEL_CONFIG } = await import('../config/constants');
@@ -193,19 +339,20 @@ export function TestPage({
               )
               : rawResult;
 
+            const normalizedConfidence = normalizeConfidence(adjusted.confidence, 'browser');
             setCurrentPrediction(adjusted.prediction);
-            setConfidence(normalizeConfidence(adjusted.confidence, 'browser'));
-            sampleBuffer.splice(0, sampleBuffer.length - MODEL_CONFIG.WINDOW_STRIDE);
+            setConfidence(normalizedConfidence);
+            appendInferenceFrame(adjusted.prediction, normalizedConfidence);
+            startGuidedSequenceOnFirstPrediction();
+            // Keep an overlapping window and slide by WINDOW_STRIDE samples.
+            sampleBuffer.splice(0, MODEL_CONFIG.WINDOW_STRIDE);
           }
         });
       }
     } catch (err) {
+      guidedWaitingForFirstPredictionRef.current = false;
       setIsRunning(false);
-      if (liveSessionStopTimerRef.current !== null) {
-        window.clearTimeout(liveSessionStopTimerRef.current);
-        liveSessionStopTimerRef.current = null;
-      }
-      liveSessionStartedAtRef.current = null;
+      resetGuidedRuntime(false);
       console.error('Start testing failed:', err);
       setLiveError(
         err instanceof Error
@@ -215,26 +362,16 @@ export function TestPage({
     }
   };
 
-  const stopTesting = () => void stopTestingInternal();
+  const stopTesting = () => void stopTestingInternal('Guided testing stopped.');
 
-  // ---------- Scoring ----------
-  const recordResult = (gestureId: string, wasCorrect: boolean) => {
-    setScores((prev) => {
-      const existing = prev[gestureId] ?? { correct: 0, total: 0 };
-      return {
-        ...prev,
-        [gestureId]: {
-          correct: existing.correct + (wasCorrect ? 1 : 0),
-          total: existing.total + 1,
-        },
-      };
-    });
-  };
-
-  const resetScores = () => {
-    setScores(
-      Object.fromEntries(labels.map((l) => [l.id, { correct: 0, total: 0 }])),
-    );
+  const resetGuidedResults = () => {
+    if (isRunning) return;
+    setChallengeNote(null);
+    setGuidedPhase('idle');
+    setGuidedIntervals([]);
+    setActiveTargetIndex(0);
+    setTargetMsRemaining(GUIDED_PROMPT_MS);
+    setSessionMsRemaining(guidedTargets.length * GUIDED_PROMPT_MS);
   };
 
   // ---------- Computed ----------
@@ -244,10 +381,13 @@ export function TestPage({
     }
 
     if (currentPrediction >= 0 && currentPrediction < labels.length) {
-      if (confidence < LIVE_IDLE_CONFIDENCE_THRESHOLD) {
+      const predictedLabel = labels[currentPrediction];
+      const isExplicitIdle = predictedLabel.name.trim().toLowerCase() === 'idle';
+
+      if (hasVirtualIdleTarget && confidence < LIVE_IDLE_CONFIDENCE_THRESHOLD) {
         return { label: 'Idle', isIdle: true };
       }
-      return { label: labels[currentPrediction].name, isIdle: false };
+      return { label: predictedLabel.name, isIdle: isExplicitIdle };
     }
 
     if (currentPrediction === labels.length) {
@@ -255,24 +395,33 @@ export function TestPage({
     }
 
     return { label: `Class ${currentPrediction}`, isIdle: false };
-  }, [confidence, currentPrediction, labels]);
+  }, [confidence, currentPrediction, hasVirtualIdleTarget, labels]);
 
-  const totalCorrect = Object.values(scores).reduce((sum, s) => sum + s.correct, 0);
-  const totalAttempts = Object.values(scores).reduce((sum, s) => sum + s.total, 0);
-  const overallAccuracy = totalAttempts > 0 ? totalCorrect / totalAttempts : 0;
+  const guidedSummary = useMemo(
+    () => summarizeGuidedIntervals(guidedTargets, guidedIntervals),
+    [guidedIntervals, guidedTargets],
+  );
+  const challengeRows = guidedSummary.targetSummaries;
+  const challengeComplete = guidedPhase === 'complete' && guidedSummary.totalIntervals > 0;
+  const activeTarget = guidedTargets[activeTargetIndex] ?? null;
+  const activeTargetScoredIntervals = activeTarget
+    ? guidedIntervals.filter((interval) => interval.targetId === activeTarget.id).length
+    : 0;
+  const nonIdleGestureCount = labels.filter(
+    (label) => label.name.trim().toLowerCase() !== 'idle',
+  ).length;
 
   // ---------- Render ----------
   return (
     <div className="p-4 max-w-5xl mx-auto space-y-6">
-      {/* Live Inference Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <div className="card bg-gradient-to-br from-white to-slate-50">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h1 className="heading-md mb-2">🧪 Test Your AI</h1>
+                <h1 className="heading-md mb-2">🧪 Guided Inference Check</h1>
                 <p className="text-slate-600">
-                  Perform each gesture and mark whether the AI got it right.
+                  Follow the prompts. The app scores each 4-second interval automatically.
                 </p>
               </div>
 
@@ -293,7 +442,6 @@ export function TestPage({
               </div>
             </div>
 
-            {/* Big prediction display */}
             <div className="bg-slate-900 rounded-2xl p-8 text-center relative overflow-hidden min-h-[300px] flex flex-col items-center justify-center">
               <div
                 className="absolute inset-0 opacity-10"
@@ -361,30 +509,36 @@ export function TestPage({
               )}
             </div>
 
-            {/* Start / Stop button */}
             <div className="mt-6 flex justify-center">
               {!isRunning ? (
                 <button
                   onClick={startTesting}
                   className="btn-primary text-xl px-12 py-4 shadow-xl shadow-primary-200"
                 >
-                  Start Testing
+                  Start Guided Check
                 </button>
               ) : (
                 <button
                   onClick={stopTesting}
                   className="btn-danger text-xl px-12 py-4 shadow-xl shadow-rose-200"
                 >
-                  Stop Testing
+                  Stop Guided Check
                 </button>
               )}
             </div>
 
             <div className="mt-3 text-center text-sm text-slate-600">
               {isRunning
-                ? `Session auto-ends in ${formatClock(sessionMsRemaining)}`
-                : `Each live testing session runs up to ${formatClock(LIVE_SESSION_MAX_MS)}.`}
+                ? `Guided testing ends in ${formatClock(sessionMsRemaining)}`
+                : `Each guided run scores ${GUIDED_INTERVALS_PER_TARGET} intervals per target (${formatClock(guidedTargets.length * GUIDED_PROMPT_MS)} total).`}
             </div>
+
+            {useArduinoInference && (
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                On Device uses the model currently stored on Arduino.
+                Retraining in the web app does not upload automatically.
+              </div>
+            )}
 
             {liveError && (
               <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
@@ -398,114 +552,131 @@ export function TestPage({
           </div>
         </div>
 
-        {/* Right column: Scoring panel */}
         <div className="space-y-6">
-          {/* Overall accuracy */}
-          <div className="card bg-gradient-to-br from-emerald-50 to-white border border-emerald-200">
-            <div className="text-center">
-              <div className="text-xs uppercase tracking-wider text-emerald-600 font-bold mb-1">
-                Overall Accuracy
-              </div>
-              <div className="text-4xl font-bold text-emerald-800">
-                {totalAttempts > 0 ? formatPercent(overallAccuracy) : '—'}
-              </div>
-              <div className="text-sm text-emerald-600 mt-1">
-                {totalCorrect} / {totalAttempts} correct
-              </div>
-            </div>
-          </div>
-
-          {/* Per-gesture scoring */}
-          <div className="card">
-            <h3 className="font-bold text-slate-800 mb-1">Score Each Gesture</h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Perform a gesture, then tap ✅ if the AI was right or ❌ if it was wrong.
+          <div className="card bg-gradient-to-br from-amber-50 to-white border border-amber-200">
+            <h3 className="font-bold text-amber-900 mb-2 flex items-center gap-2">
+              <span className="text-xl">🏁</span> Guided Gesture Scoring
+            </h3>
+            <p className="text-sm text-amber-800">
+              30 seconds per target, scored once every 4 seconds.
             </p>
 
-            <div className="space-y-3">
-              {labels.map((label) => {
-                const score = scores[label.id] ?? { correct: 0, total: 0 };
-                const accuracy = score.total > 0 ? score.correct / score.total : 0;
-                const isActive = activeGestureId === label.id;
-
-                return (
-                  <div
-                    key={label.id}
-                    className={`rounded-xl border-2 p-3 transition-all cursor-pointer ${
-                      isActive
-                        ? 'border-primary-400 bg-primary-50 shadow-md'
-                        : 'border-slate-200 bg-white hover:border-slate-300'
-                    }`}
-                    onClick={() => setActiveGestureId(label.id)}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-bold text-slate-800">{label.name}</span>
-                      <span className={`text-sm font-bold ${
-                        score.total === 0
-                          ? 'text-slate-400'
-                          : accuracy >= 0.8
-                          ? 'text-emerald-600'
-                          : accuracy >= 0.5
-                            ? 'text-amber-600'
-                            : 'text-rose-600'
-                      }`}>
-                        {score.correct}/{score.total}
-                      </span>
-                    </div>
-
-                    {/* Progress bar */}
-                    {score.total > 0 && (
-                      <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mb-2">
-                        <div
-                          className={`h-full transition-all duration-300 rounded-full ${
-                            accuracy >= 0.8
-                              ? 'bg-emerald-500'
-                              : accuracy >= 0.5
-                              ? 'bg-amber-500'
-                              : 'bg-rose-500'
-                          }`}
-                          style={{ width: `${accuracy * 100}%` }}
-                        />
-                      </div>
-                    )}
-
-                    {/* Score buttons — only show for active gesture */}
-                    {isActive && (
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            recordResult(label.id, true);
-                          }}
-                          className="flex-1 py-2 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-700 font-bold text-sm transition-colors active:scale-95 border border-emerald-200"
-                        >
-                          ✅ Correct
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            recordResult(label.id, false);
-                          }}
-                          className="flex-1 py-2 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold text-sm transition-colors active:scale-95 border border-rose-200"
-                        >
-                          ❌ Wrong
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                30s prompt / target
+              </span>
+              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                4s scoring interval
+              </span>
+              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                {GUIDED_INTERVALS_PER_TARGET} scored intervals / target
+              </span>
             </div>
 
-            <button
-              onClick={resetScores}
-              className="w-full mt-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 font-semibold text-sm hover:bg-slate-50 transition-colors"
-            >
-              Reset All Scores
-            </button>
+            <div className="mt-4 rounded-xl border border-amber-200 bg-white p-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-semibold text-slate-700">Overall Success</span>
+                <span className="font-bold text-slate-900">
+                  {formatPercent(guidedSummary.overallSuccessRate)}
+                </span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-rose-100">
+                <div
+                  className="h-full bg-emerald-500 transition-all duration-300"
+                  style={{ width: `${guidedSummary.overallSuccessRate * 100}%` }}
+                />
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
+                <div className="rounded-lg bg-slate-50 border border-slate-200 p-2">
+                  Success: {formatPercent(guidedSummary.overallSuccessRate)}
+                </div>
+                <div className="rounded-lg bg-slate-50 border border-slate-200 p-2">
+                  Failure: {formatPercent(guidedSummary.overallFailureRate)}
+                </div>
+                <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 col-span-2">
+                  Averaged per-target success: {formatPercent(guidedSummary.macroSuccessRate)}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-700">
+                {activeTarget && isRunning
+                  ? (
+                    <>
+                      <div className="font-semibold">Current target: {activeTarget.name}</div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        {activeTarget.kind === 'idle'
+                          ? 'Stay still and let the model choose Idle.'
+                          : 'Perform the target gesture consistently.'}
+                      </div>
+                      <div className="mt-2 text-xs text-slate-600">
+                        Target timer: {formatClock(targetMsRemaining)} | Interval
+                        {' '}
+                        {Math.min(GUIDED_INTERVALS_PER_TARGET, activeTargetScoredIntervals)}
+                        /
+                        {GUIDED_INTERVALS_PER_TARGET}
+                      </div>
+                    </>
+                  )
+                  : (
+                    <div>Press <strong>Start Guided Check</strong> to run the full sequence.</div>
+                  )}
+              </div>
+
+              <button
+                onClick={resetGuidedResults}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                disabled={isRunning}
+              >
+                Reset Guided Results
+              </button>
+            </div>
+
+            {challengeNote && (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                {challengeNote}
+              </div>
+            )}
+
+            {nonIdleGestureCount === 1 && (
+              <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+                Single-gesture projects evaluate your target gesture against <strong>Idle</strong>.
+              </div>
+            )}
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-slate-500 border-b border-slate-200">
+                    <th className="py-2 pr-4">Target</th>
+                    <th className="py-2 pr-4">Correct</th>
+                    <th className="py-2 pr-4">Total</th>
+                    <th className="py-2 pr-4">Success</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {challengeRows.map((row) => (
+                    <tr key={row.targetId} className="border-b border-slate-100 text-slate-700">
+                      <td className="py-2 pr-4 font-medium">{row.targetName}</td>
+                      <td className="py-2 pr-4">{row.correctIntervals}</td>
+                      <td className="py-2 pr-4">{row.totalIntervals}</td>
+                      <td className="py-2 pr-4">{formatPercent(row.successRate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {challengeComplete && (
+              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                Guided testing complete. Final success: {formatPercent(guidedSummary.overallSuccessRate)}
+                {' '}
+                ({guidedSummary.totalCorrectIntervals}/{guidedSummary.totalIntervals} intervals).
+              </div>
+            )}
           </div>
 
-          {/* Navigation */}
           {!isRunning && (
             <div className="space-y-2">
               {onOpenPortfolio && (
