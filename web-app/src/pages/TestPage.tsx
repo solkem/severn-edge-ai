@@ -31,28 +31,15 @@ const GUIDED_INTERVAL_MS = 4 * 1000;
 const GUIDED_INTERVALS_PER_TARGET = Math.floor(GUIDED_PROMPT_MS / GUIDED_INTERVAL_MS);
 const GUIDED_INTERVAL_MIN_FRAMES = 8;
 const INFERENCE_FRAME_BUFFER_MS = 20000;
-const DEFAULT_SAMPLE_RATE_HZ = 25;
-const DEFAULT_SAMPLE_DT_MS = 1000 / DEFAULT_SAMPLE_RATE_HZ;
+const DEFAULT_SAMPLE_DT_MS = 1000 / 25;
 const EMA_ALPHA = 0.2;
 
-interface LatencyTelemetry {
+interface InferenceTimingState {
   lastPacketTimestamp16: number | null;
   packetTimestampWrapOffsetMs: number;
   lastPacketTimestampExtendedMs: number | null;
-  latestPacketLocalTimestampMs: number | null;
   clockOffsetMs: number | null;
   sampleDtEmaMs: number | null;
-  transportLagEmaMs: number | null;
-  lastPredictionLocalTimestampMs: number | null;
-  predictionDtEmaMs: number | null;
-}
-
-interface LatencySnapshot {
-  sampleRateHz: number;
-  windowLagMs: number;
-  transportLagMs: number;
-  totalLagMs: number;
-  predictionCadenceMs: number;
 }
 
 function emaUpdate(previous: number | null, next: number): number {
@@ -62,28 +49,13 @@ function emaUpdate(previous: number | null, next: number): number {
   return previous === null ? next : previous + (next - previous) * EMA_ALPHA;
 }
 
-function createLatencyTelemetry(): LatencyTelemetry {
+function createInferenceTimingState(): InferenceTimingState {
   return {
     lastPacketTimestamp16: null,
     packetTimestampWrapOffsetMs: 0,
     lastPacketTimestampExtendedMs: null,
-    latestPacketLocalTimestampMs: null,
     clockOffsetMs: null,
     sampleDtEmaMs: null,
-    transportLagEmaMs: null,
-    lastPredictionLocalTimestampMs: null,
-    predictionDtEmaMs: null,
-  };
-}
-
-function createInitialLatencySnapshot(): LatencySnapshot {
-  const windowMs = MODEL_CONFIG.WINDOW_SIZE * DEFAULT_SAMPLE_DT_MS;
-  return {
-    sampleRateHz: DEFAULT_SAMPLE_RATE_HZ,
-    windowLagMs: windowMs / 2,
-    transportLagMs: 0,
-    totalLagMs: windowMs / 2,
-    predictionCadenceMs: MODEL_CONFIG.WINDOW_STRIDE * DEFAULT_SAMPLE_DT_MS,
   };
 }
 
@@ -120,9 +92,6 @@ export function TestPage({
   const [useArduinoInference, setUseArduinoInference] = useState(false);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [challengeNote, setChallengeNote] = useState<string | null>(null);
-  const [latencySnapshot, setLatencySnapshot] = useState<LatencySnapshot>(
-    createInitialLatencySnapshot(),
-  );
 
   // Guided testing state
   const guidedTargets = useMemo(() => buildGuidedTestTargets(labels), [labels]);
@@ -144,7 +113,7 @@ export function TestPage({
   const guidedActiveTargetIndexRef = useRef(0);
   const inferenceFramesRef = useRef<InferenceFrame[]>([]);
   const guidedWaitingForFirstPredictionRef = useRef(false);
-  const latencyTelemetryRef = useRef<LatencyTelemetry>(createLatencyTelemetry());
+  const inferenceTimingRef = useRef<InferenceTimingState>(createInferenceTimingState());
 
   const clearGuidedTimer = useCallback(() => {
     if (guidedTimerRef.current !== null) {
@@ -190,32 +159,13 @@ export function TestPage({
     }
   }, []);
 
-  const resetLatencyTelemetry = useCallback(() => {
-    latencyTelemetryRef.current = createLatencyTelemetry();
-    setLatencySnapshot(createInitialLatencySnapshot());
-  }, []);
-
-  const updateLatencySnapshot = useCallback((includeTransport: boolean) => {
-    const telemetry = latencyTelemetryRef.current;
-    const sampleDtMs = telemetry.sampleDtEmaMs ?? DEFAULT_SAMPLE_DT_MS;
-    const sampleRateHz = sampleDtMs > 0 ? 1000 / sampleDtMs : DEFAULT_SAMPLE_RATE_HZ;
-    const windowLagMs = (MODEL_CONFIG.WINDOW_SIZE * sampleDtMs) / 2;
-    const transportLagMs = includeTransport ? telemetry.transportLagEmaMs ?? 0 : 0;
-    const predictionCadenceMs =
-      telemetry.predictionDtEmaMs ?? MODEL_CONFIG.WINDOW_STRIDE * sampleDtMs;
-
-    setLatencySnapshot({
-      sampleRateHz,
-      windowLagMs,
-      transportLagMs,
-      totalLagMs: windowLagMs + transportLagMs,
-      predictionCadenceMs,
-    });
+  const resetInferenceTiming = useCallback(() => {
+    inferenceTimingRef.current = createInferenceTimingState();
   }, []);
 
   const registerPacketTiming = useCallback((packetTimestamp: number): number => {
     const now = Date.now();
-    const telemetry = latencyTelemetryRef.current;
+    const telemetry = inferenceTimingRef.current;
 
     if (
       telemetry.lastPacketTimestamp16 !== null
@@ -241,32 +191,8 @@ export function TestPage({
     telemetry.lastPacketTimestampExtendedMs = packetTimestampExtendedMs;
 
     const packetLocalTimestampMs = packetTimestampExtendedMs + (telemetry.clockOffsetMs ?? 0);
-    telemetry.latestPacketLocalTimestampMs = packetLocalTimestampMs;
-
-    const transportLagMs = now - packetLocalTimestampMs;
-    if (transportLagMs >= 0 && transportLagMs < 2000) {
-      telemetry.transportLagEmaMs = emaUpdate(telemetry.transportLagEmaMs, transportLagMs);
-    }
-
     return packetLocalTimestampMs;
   }, []);
-
-  const registerPredictionTiming = useCallback((includeTransport: boolean) => {
-    const now = Date.now();
-    const telemetry = latencyTelemetryRef.current;
-
-    if (telemetry.lastPredictionLocalTimestampMs !== null) {
-      const predictionDtMs = now - telemetry.lastPredictionLocalTimestampMs;
-      if (predictionDtMs > 0 && predictionDtMs < 5000) {
-        telemetry.predictionDtEmaMs = emaUpdate(
-          telemetry.predictionDtEmaMs,
-          predictionDtMs,
-        );
-      }
-    }
-    telemetry.lastPredictionLocalTimestampMs = now;
-    updateLatencySnapshot(includeTransport);
-  }, [updateLatencySnapshot]);
 
   // ---------- Cleanup ----------
   useEffect(() => {
@@ -428,7 +354,7 @@ export function TestPage({
     setCurrentPrediction(null);
     setConfidence(0);
     resetGuidedRuntime(true);
-    resetLatencyTelemetry();
+    resetInferenceTiming();
     inferenceFramesRef.current = [];
     guidedWaitingForFirstPredictionRef.current = true;
     setIsRunning(true);
@@ -453,7 +379,6 @@ export function TestPage({
             normalizedConfidence,
             Date.now() - modelWindowMs / 2,
           );
-          registerPredictionTiming(false);
           startGuidedSequenceOnFirstPrediction();
         });
       } else {
@@ -495,14 +420,13 @@ export function TestPage({
             setCurrentPrediction(adjusted.prediction);
             setConfidence(normalizedConfidence);
             const sampleDtMs =
-              latencyTelemetryRef.current.sampleDtEmaMs ?? DEFAULT_SAMPLE_DT_MS;
+              inferenceTimingRef.current.sampleDtEmaMs ?? DEFAULT_SAMPLE_DT_MS;
             const modelWindowMs = MODEL_CONFIG.WINDOW_SIZE * sampleDtMs;
             appendInferenceFrame(
               adjusted.prediction,
               normalizedConfidence,
               latestPacketLocalTimestampMs - modelWindowMs / 2,
             );
-            registerPredictionTiming(true);
             startGuidedSequenceOnFirstPrediction();
             // Keep an overlapping window and slide by WINDOW_STRIDE samples.
             sampleBuffer.splice(0, MODEL_CONFIG.WINDOW_STRIDE);
@@ -691,29 +615,6 @@ export function TestPage({
               {isRunning
                 ? `Guided testing ends in ${formatClock(sessionMsRemaining)}`
                 : `Each guided run scores ${GUIDED_INTERVALS_PER_TARGET} intervals per target (${formatClock(guidedTargets.length * GUIDED_PROMPT_MS)} total).`}
-            </div>
-
-            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-              <div className="font-semibold">Latency Estimate</div>
-              <div className="mt-1">
-                Model window delay: <strong>~{(latencySnapshot.windowLagMs / 1000).toFixed(1)}s</strong>
-                {!useArduinoInference && (
-                  <>
-                    {' '}| Stream delay: <strong>{Math.round(latencySnapshot.transportLagMs)} ms</strong>
-                  </>
-                )}
-              </div>
-              <div>
-                Total estimated response delay:{' '}
-                <strong>~{(latencySnapshot.totalLagMs / 1000).toFixed(1)}s</strong>
-              </div>
-              <div className="text-slate-500">
-                {latencySnapshot.sampleRateHz.toFixed(1)} Hz sample rate |{' '}
-                {(latencySnapshot.predictionCadenceMs / 1000).toFixed(2)}s prediction cadence
-              </div>
-              <div className="text-slate-500 mt-1">
-                Most lag comes from the 4s model window. Reducing `WINDOW_SIZE` lowers delay but requires retraining and firmware/web config updates.
-              </div>
             </div>
 
             {useArduinoInference && (
