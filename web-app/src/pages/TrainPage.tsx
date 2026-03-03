@@ -22,9 +22,15 @@ interface TrainPageProps {
   samples: Sample[];
   labels: GestureLabel[];
   onComplete: (trainingService: TrainingService) => void;
+  onCollectMoreData?: () => void;
 }
 
-export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
+export function TrainPage({
+  samples,
+  labels,
+  onComplete,
+  onCollectMoreData,
+}: TrainPageProps) {
   const [isTraining, setIsTraining] = useState(false);
   const [isDone, setIsDone] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -411,6 +417,26 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
                         className="btn-secondary text-sm py-2 px-4 bg-blue-100 hover:bg-blue-200 border-blue-300 text-blue-900"
                       >
                          Train More
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {onCollectMoreData && (
+                <div className="bg-indigo-50 rounded-xl p-4 border border-indigo-200">
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl"></span>
+                    <div className="flex-grow text-left">
+                      <h4 className="font-bold text-indigo-900 mb-1">Need More Data?</h4>
+                      <p className="text-sm text-indigo-700 mb-3">
+                        Add extra training examples for any gesture, then retrain with the larger dataset.
+                      </p>
+                      <button
+                        onClick={onCollectMoreData}
+                        className="btn-secondary text-sm py-2 px-4 bg-white hover:bg-indigo-100 border-indigo-300 text-indigo-900"
+                      >
+                        Collect More Data (Optional)
                       </button>
                     </div>
                   </div>

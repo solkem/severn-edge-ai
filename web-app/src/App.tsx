@@ -50,6 +50,7 @@ function App() {
   const [trainingService, setTrainingService] = useState<TrainingService | null>(null);
   const [activeCheck, setActiveCheck] = useState<KnowledgeCheck | null>(null);
   const [pendingStage, setPendingStage] = useState<AppStageType | null>(null);
+  const [collectMode, setCollectMode] = useState<'default' | 'append-train'>('default');
 
 
   const initializeSession = useSessionStore((state) => state.initialize);
@@ -135,6 +136,7 @@ function App() {
     collectedSamples: Sample[],
     collectedLabels: GestureLabel[],
   ) => {
+    setCollectMode('default');
     const normalizedLabels = withTotalSampleCounts(collectedLabels, collectedSamples);
     setSessionGestures(normalizedLabels);
     await setSessionSamples(collectedSamples);
@@ -142,6 +144,17 @@ function App() {
       addBadge('data-scientist');
     }
     requestGate('gate-2-gesture', AppStage.TRAIN);
+  };
+
+  const handleAppendCollectComplete = async (
+    collectedSamples: Sample[],
+    collectedLabels: GestureLabel[],
+  ) => {
+    const normalizedLabels = withTotalSampleCounts(collectedLabels, collectedSamples);
+    setSessionGestures(normalizedLabels);
+    await setSessionSamples(collectedSamples);
+    setCollectMode('default');
+    goToStage(AppStage.TRAIN);
   };
 
   const handleTrainComplete = (service: TrainingService) => {
@@ -162,6 +175,15 @@ function App() {
     requestGate('gate-4-edge-ai', nextStage);
   };
 
+  const handleCollectMoreData = () => {
+    setCollectMode('append-train');
+    goToStage(AppStage.COLLECT);
+  };
+
+  const handleCancelAppendCollect = () => {
+    setCollectMode('default');
+    goToStage(AppStage.TRAIN);
+  };
 
 
   const handleStartOver = () => {
@@ -171,6 +193,7 @@ function App() {
     setTrainingService(null);
     setActiveCheck(null);
     setPendingStage(null);
+    setCollectMode('default');
     clearResumeStage();
   };
 
@@ -274,13 +297,30 @@ function App() {
         {stage === AppStage.PREVIEW && <PreviewPage onReady={handlePreviewReady} />}
 
         {stage === AppStage.COLLECT && (
-          <CollectPage
-            onComplete={handleCollectComplete}
-          />
+          collectMode === 'append-train' ? (
+            <CollectPage
+              onComplete={handleAppendCollectComplete}
+              initialLabels={labels}
+              initialSamples={samples}
+              targetSplit="train"
+              appendMode
+              requiredSamplesPerGesture={3}
+              onCancel={handleCancelAppendCollect}
+            />
+          ) : (
+            <CollectPage
+              onComplete={handleCollectComplete}
+            />
+          )
         )}
 
         {stage === AppStage.TRAIN && (
-          <TrainPage samples={samples} labels={labels} onComplete={handleTrainComplete} />
+          <TrainPage
+            samples={samples}
+            labels={labels}
+            onComplete={handleTrainComplete}
+            onCollectMoreData={handleCollectMoreData}
+          />
         )}
 
         {stage === AppStage.TEST && trainingService && (
