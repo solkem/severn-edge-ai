@@ -561,18 +561,6 @@ export function TestPage({
               30 seconds per target, scored once every 4 seconds.
             </p>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                30s prompt / target
-              </span>
-              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                4s scoring interval
-              </span>
-              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
-                {GUIDED_INTERVALS_PER_TARGET} scored intervals / target
-              </span>
-            </div>
-
             <div className="mt-4 rounded-xl border border-amber-200 bg-white p-3">
               <div className="flex items-center justify-between text-sm">
                 <span className="font-semibold text-slate-700">Overall Success</span>

@@ -66,17 +66,6 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
     return counts;
   }, [labels, trainingSamples]);
 
-  const testSampleCountByLabel = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const label of labels) {
-      counts.set(label.id, 0);
-    }
-    for (const sample of testSamples) {
-      counts.set(sample.label, (counts.get(sample.label) ?? 0) + 1);
-    }
-    return counts;
-  }, [labels, testSamples]);
-
   // Check if we have samples to train with
   const hasSamples = trainingSamples.length > 0;
   const hasEnoughSamples = labels.every(
@@ -253,20 +242,12 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
                     {trainingSamples.length}
                   </span>
                 </div>
-                <div className="flex justify-between items-center p-3 bg-white rounded-xl border border-slate-100">
-                  <span className="text-slate-600">Held-out Test Samples</span>
-                  <span className={`font-bold text-lg ${testSamples.length > 0 ? 'text-amber-600' : 'text-slate-400'}`}>
-                    {testSamples.length}
-                  </span>
-                </div>
                 <div className="space-y-2">
                   {labels.map((label) => (
                     <div key={label.id} className="flex justify-between text-sm text-slate-500 px-2">
                       <span>{label.name}</span>
                       <span className={(trainingSampleCountByLabel.get(label.id) ?? 0) >= 3 ? 'text-emerald-600' : 'text-amber-600'}>
                         {trainingSampleCountByLabel.get(label.id) ?? 0} train
-                        {' / '}
-                        {testSampleCountByLabel.get(label.id) ?? 0} test
                         {' '}
                         {(trainingSampleCountByLabel.get(label.id) ?? 0) < 3 && '(need 3+ train)'}
                       </span>
@@ -401,7 +382,6 @@ export function TrainPage({ samples, labels, onComplete }: TrainPageProps) {
                 <div className="text-7xl font-bold text-emerald-600 mb-2 tracking-tighter">
                   {formatAccuracy(accuracy)}<span className="text-4xl">%</span>
                 </div>
-                <div className="text-emerald-700 font-medium">Validation Accuracy (last epoch)</div>
               </div>
 
               <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 text-left">

@@ -12,30 +12,6 @@ export function ShareSection() {
     downloadPortfolio(session, samples, journal, anonymized);
   };
 
-  const emailFamily = () => {
-    const subject = encodeURIComponent(
-      `Look what I built: ${session.projectBrief?.name || 'My Edge AI Project'}`,
-    );
-    const body = encodeURIComponent(
-      [
-        'Hi!',
-        '',
-        'Today I trained an AI model that runs on an Arduino.',
-        '',
-        `Project: ${session.projectBrief?.name || 'Gesture AI'}`,
-        `Gestures: ${session.gestures.map((g) => g.name).join(', ') || 'N/A'}`,
-        session.trainingAccuracy !== null
-          ? `Training accuracy: ${Math.round(session.trainingAccuracy * 100)}%`
-          : '',
-        '',
-        'I attached/downloaded my portfolio HTML to share.',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    );
-    window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
-  };
-
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5">
       <h3 className="text-lg font-bold text-slate-800 mb-2">Share Your Work</h3>
@@ -56,14 +32,7 @@ export function ShareSection() {
         <button onClick={download} className="btn-primary">
           Download Portfolio
         </button>
-        <button
-          onClick={emailFamily}
-          className="px-4 py-2 rounded-lg border border-slate-300 font-semibold text-slate-700 hover:bg-slate-50"
-        >
-          Email Family
-        </button>
       </div>
     </div>
   );
 }
-
